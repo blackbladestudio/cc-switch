@@ -171,6 +171,10 @@ pub(crate) fn sanitize_claude_settings_for_live(settings: &Value) -> Value {
         obj.remove("apiFormat");
         obj.remove("openrouter_compat_mode");
         obj.remove("openrouterCompatMode");
+        obj.remove("modelApiFormats");
+        obj.remove("model_api_formats");
+        obj.remove("modelApiOverrides");
+        obj.remove("model_api_overrides");
     }
     v
 }

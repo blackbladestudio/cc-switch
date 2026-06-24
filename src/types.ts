@@ -200,6 +200,12 @@ export interface ProviderMeta {
     | "openai_chat"
     | "openai_responses"
     | "gemini_native";
+  // 按模型名/前缀覆盖 API 格式
+  // key: 精确模型名 或 "prefix*" 前缀模式
+  // value: ClaudeApiFormat
+  modelApiFormats?: Record<string, ClaudeApiFormat>;
+  // 按模型名/前缀覆盖 API 格式和 Base URL
+  modelApiOverrides?: Record<string, ModelApiOverride>;
   // 通用认证绑定
   authBinding?: AuthBinding;
   // Claude 认证字段名
@@ -249,6 +255,14 @@ export type ClaudeApiFormat =
   | "openai_chat"
   | "openai_responses"
   | "gemini_native";
+
+// 按模型名/前缀覆盖协议与上游地址的单条规则
+// - apiFormat: 留空表示沿用供应商默认协议
+// - baseUrl: 仅填到服务根或 /v1，不要填完整的 /v1/chat/completions 等端点
+export interface ModelApiOverride {
+  apiFormat?: ClaudeApiFormat;
+  baseUrl?: string;
+}
 
 // Codex API 格式类型
 // - "openai_responses": OpenAI Responses API 格式，直接透传

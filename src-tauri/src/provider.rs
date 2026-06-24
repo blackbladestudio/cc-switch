@@ -395,6 +395,17 @@ impl LocalProxyRequestOverrides {
     }
 }
 
+/// 按模型名/前缀覆盖 Claude 协议与上游地址。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProviderModelApiOverride {
+    /// 覆盖该模型使用的 API 格式。
+    #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
+    pub api_format: Option<String>,
+    /// 覆盖该模型使用的上游 Base URL。
+    #[serde(rename = "baseUrl", skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
 /// 供应商元数据
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderMeta {
@@ -450,6 +461,24 @@ pub struct ProviderMeta {
     /// - "openai_responses": OpenAI Responses API 格式，需要转换
     #[serde(rename = "apiFormat", skip_serializing_if = "Option::is_none")]
     pub api_format: Option<String>,
+    /// 按模型名/前缀覆盖 API 格式。
+    /// key 为模型名精确匹配或以 `*` 结尾的前缀模式，value 为 apiFormat 值。
+    /// 优先级：精确匹配 > 最长前缀匹配 > 供应商级 apiFormat 默认值。
+    #[serde(
+        rename = "modelApiFormats",
+        default,
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub model_api_formats: HashMap<String, String>,
+    /// 按模型名/前缀覆盖 API 格式和 Base URL。
+    /// key 为模型名精确匹配或以 `*` 结尾的前缀模式。
+    /// 优先级：精确匹配 > 最长前缀匹配 > modelApiFormats > 供应商默认配置。
+    #[serde(
+        rename = "modelApiOverrides",
+        default,
+        skip_serializing_if = "HashMap::is_empty"
+    )]
+    pub model_api_overrides: HashMap<String, ProviderModelApiOverride>,
     /// 通用认证绑定（provider_config / managed_account）
     ///
     /// 新代码应只写入该字段；githubAccountId 仅保留兼容读取。

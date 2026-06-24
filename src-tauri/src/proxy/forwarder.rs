@@ -75,6 +75,37 @@ pub struct ForwardError {
     pub provider: Option<Provider>,
 }
 
+#[derive(Debug, Clone)]
+struct ResolvedClaudeModelOverride {
+    api_format: Option<String>,
+    base_url: Option<String>,
+}
+
+/// 按模型名匹配规则：精确匹配优先，其次最长前缀（`prefix*`）匹配。
+///
+/// 同时服务于 `modelApiOverrides`（结构体）与旧版 `modelApiFormats`（字符串）两张表。
+fn match_model_pattern<'a, V>(
+    map: &'a std::collections::HashMap<String, V>,
+    model_id: &str,
+) -> Option<&'a V> {
+    if let Some(value) = map.get(model_id) {
+        return Some(value);
+    }
+    map.iter()
+        .filter_map(|(pattern, value)| pattern.strip_suffix('*').map(|prefix| (prefix, value)))
+        .filter(|(prefix, _)| model_id.starts_with(*prefix))
+        .max_by_key(|(prefix, _)| prefix.len())
+        .map(|(_, value)| value)
+}
+
+/// 已知合法的 Claude API 格式集合。配置中出现未知值时回退到默认协议。
+fn is_known_claude_api_format(value: &str) -> bool {
+    matches!(
+        value,
+        "anthropic" | "openai_chat" | "openai_responses" | "gemini_native"
+    )
+}
+
 /// 活跃连接 RAII guard
 ///
 /// 构造时把 `ProxyStatus.active_connections` +1；Drop 时在 tokio runtime 上调度
@@ -1323,10 +1354,37 @@ impl RequestForwarder {
                 }
             }
         }
+        let resolved_claude_model_override = if adapter.name() == "Claude" && !is_copilot {
+            self.resolve_claude_model_override(provider, &mapped_body)
+        } else {
+            None
+        };
+        if let Some(base_url_override) = resolved_claude_model_override
+            .as_ref()
+            .and_then(|override_config| override_config.base_url.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            log::debug!(
+                "[Claude] 按模型覆盖 Base URL: provider={}, model={}, base_url={}",
+                provider.id,
+                mapped_body
+                    .get("model")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(""),
+                base_url_override
+            );
+            base_url = base_url_override.trim_end_matches('/').to_string();
+        }
         let resolved_claude_api_format = if adapter.name() == "Claude" {
             Some(
-                self.resolve_claude_api_format(provider, &mapped_body, is_copilot)
-                    .await,
+                self.resolve_claude_api_format(
+                    provider,
+                    &mapped_body,
+                    is_copilot,
+                    resolved_claude_model_override.as_ref(),
+                )
+                .await,
             )
         } else {
             None
@@ -2533,22 +2591,75 @@ impl RequestForwarder {
         provider: &Provider,
         body: &Value,
         is_copilot: bool,
+        model_override: Option<&ResolvedClaudeModelOverride>,
     ) -> String {
-        if !is_copilot {
-            return super::providers::get_claude_api_format(provider).to_string();
+        // Copilot 特殊路径：通过 live /models 列表按 vendor 选择协议
+        if is_copilot {
+            let model = body.get("model").and_then(|value| value.as_str());
+            if let Some(model_id) = model {
+                if self
+                    .is_copilot_openai_vendor_model(provider, model_id)
+                    .await
+                {
+                    return "openai_responses".to_string();
+                }
+            }
+            return "openai_chat".to_string();
         }
 
-        let model = body.get("model").and_then(|value| value.as_str());
-        if let Some(model_id) = model {
-            if self
-                .is_copilot_openai_vendor_model(provider, model_id)
-                .await
+        // 通用路径：按模型命中的覆盖规则选择协议（已统一合并新旧两张表）。
+        if let Some(fmt) = model_override
+            .and_then(|override_config| override_config.api_format.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            if is_known_claude_api_format(fmt) {
+                return fmt.to_string();
+            }
+            log::warn!(
+                "[Claude] 忽略未知的按模型 api_format 覆盖值: provider={}, value={}",
+                provider.id,
+                fmt
+            );
+        }
+
+        // 回退到供应商级默认
+        super::providers::get_claude_api_format(provider).to_string()
+    }
+
+    /// 解析按模型覆盖的协议与 Base URL。
+    ///
+    /// 优先级：`modelApiOverrides`（新，含 Base URL）整体优先于旧版 `modelApiFormats`；
+    /// 两张表内部均为「精确匹配 > 最长前缀匹配」。命中后才回退到供应商默认。
+    fn resolve_claude_model_override(
+        &self,
+        provider: &Provider,
+        body: &Value,
+    ) -> Option<ResolvedClaudeModelOverride> {
+        let meta = provider.meta.as_ref()?;
+        let model_id = body.get("model").and_then(|value| value.as_str())?;
+
+        if !meta.model_api_overrides.is_empty() {
+            if let Some(override_config) = match_model_pattern(&meta.model_api_overrides, model_id)
             {
-                return "openai_responses".to_string();
+                return Some(ResolvedClaudeModelOverride {
+                    api_format: override_config.api_format.clone(),
+                    base_url: override_config.base_url.clone(),
+                });
             }
         }
 
-        "openai_chat".to_string()
+        // 兼容旧版：仅含协议、无 Base URL。
+        if !meta.model_api_formats.is_empty() {
+            if let Some(fmt) = match_model_pattern(&meta.model_api_formats, model_id) {
+                return Some(ResolvedClaudeModelOverride {
+                    api_format: Some(fmt.clone()),
+                    base_url: None,
+                });
+            }
+        }
+
+        None
     }
 
     /// 用 Copilot live `/models` 列表确认 model ID 真实可用，找不到时按 family 降级。
@@ -4994,5 +5105,140 @@ mod tests {
         });
         let body = body_with_image("any-model");
         assert!(fwd.media_retry_should_trigger("Claude", false, &body, &image_unsupported_error()));
+    }
+
+    #[test]
+    fn match_model_pattern_prefers_exact_over_prefix() {
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("gpt-*".to_string(), "prefix".to_string());
+        map.insert("gpt-4o".to_string(), "exact".to_string());
+        assert_eq!(
+            match_model_pattern(&map, "gpt-4o"),
+            Some(&"exact".to_string())
+        );
+    }
+
+    #[test]
+    fn match_model_pattern_prefers_longest_prefix() {
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("gpt-*".to_string(), "short".to_string());
+        map.insert("gpt-4*".to_string(), "long".to_string());
+        assert_eq!(
+            match_model_pattern(&map, "gpt-4o-mini"),
+            Some(&"long".to_string())
+        );
+    }
+
+    #[test]
+    fn match_model_pattern_returns_none_when_no_match() {
+        let mut map: HashMap<String, String> = HashMap::new();
+        map.insert("claude-*".to_string(), "x".to_string());
+        assert_eq!(match_model_pattern(&map, "gpt-4o"), None);
+    }
+
+    #[test]
+    fn is_known_claude_api_format_filters_unknown() {
+        assert!(is_known_claude_api_format("openai_chat"));
+        assert!(is_known_claude_api_format("anthropic"));
+        assert!(!is_known_claude_api_format("totally_bogus"));
+    }
+
+    fn provider_with_overrides(
+        overrides: HashMap<String, crate::provider::ProviderModelApiOverride>,
+        legacy_formats: HashMap<String, String>,
+    ) -> Provider {
+        Provider {
+            id: "provider-ov".to_string(),
+            name: "Provider Override".to_string(),
+            settings_config: json!({}),
+            website_url: None,
+            category: None,
+            created_at: None,
+            sort_index: None,
+            notes: None,
+            meta: Some(crate::provider::ProviderMeta {
+                model_api_overrides: overrides,
+                model_api_formats: legacy_formats,
+                ..Default::default()
+            }),
+            icon: None,
+            icon_color: None,
+            in_failover_queue: false,
+        }
+    }
+
+    #[test]
+    fn resolve_override_returns_format_and_base_url() {
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "gpt-*".to_string(),
+            crate::provider::ProviderModelApiOverride {
+                api_format: Some("openai_chat".to_string()),
+                base_url: Some("https://example.com/v1".to_string()),
+            },
+        );
+        let provider = provider_with_overrides(overrides, HashMap::new());
+        let body = json!({ "model": "gpt-4o" });
+
+        let resolved = fwd
+            .resolve_claude_model_override(&provider, &body)
+            .expect("should resolve");
+        assert_eq!(resolved.api_format.as_deref(), Some("openai_chat"));
+        assert_eq!(resolved.base_url.as_deref(), Some("https://example.com/v1"));
+    }
+
+    #[test]
+    fn resolve_override_falls_back_to_legacy_formats() {
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        let mut legacy = HashMap::new();
+        legacy.insert("claude-3*".to_string(), "anthropic".to_string());
+        let provider = provider_with_overrides(HashMap::new(), legacy);
+        let body = json!({ "model": "claude-3-opus" });
+
+        let resolved = fwd
+            .resolve_claude_model_override(&provider, &body)
+            .expect("should resolve from legacy");
+        assert_eq!(resolved.api_format.as_deref(), Some("anthropic"));
+        assert_eq!(resolved.base_url, None);
+    }
+
+    #[test]
+    fn resolve_override_prefers_new_table_over_legacy() {
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        let mut overrides = HashMap::new();
+        overrides.insert(
+            "gpt-4o".to_string(),
+            crate::provider::ProviderModelApiOverride {
+                api_format: Some("openai_responses".to_string()),
+                base_url: None,
+            },
+        );
+        let mut legacy = HashMap::new();
+        legacy.insert("gpt-4o".to_string(), "openai_chat".to_string());
+        let provider = provider_with_overrides(overrides, legacy);
+        let body = json!({ "model": "gpt-4o" });
+
+        let resolved = fwd
+            .resolve_claude_model_override(&provider, &body)
+            .expect("should resolve");
+        assert_eq!(resolved.api_format.as_deref(), Some("openai_responses"));
+    }
+
+    #[tokio::test]
+    async fn resolve_api_format_ignores_unknown_override_value() {
+        let fwd = test_forwarder(Duration::from_secs(1), Duration::from_secs(1));
+        let provider = provider_with_overrides(HashMap::new(), HashMap::new());
+        let body = json!({ "model": "gpt-4o" });
+        let override_config = ResolvedClaudeModelOverride {
+            api_format: Some("bogus_format".to_string()),
+            base_url: None,
+        };
+
+        let fmt = fwd
+            .resolve_claude_api_format(&provider, &body, false, Some(&override_config))
+            .await;
+        // 未知值被忽略，回退到供应商默认（anthropic）。
+        assert_eq!(fmt, "anthropic");
     }
 }

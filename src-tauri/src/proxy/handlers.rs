@@ -224,9 +224,9 @@ async fn handle_messages_for_app(
         .to_string();
     let response = result.response;
 
-    // 检查是否需要格式转换（OpenRouter 等中转服务）
-    let adapter = get_adapter(&app_type);
-    let needs_transform = adapter.needs_transform(&ctx.provider);
+    // 检查是否需要格式转换。这里必须使用 forwarder 返回的实际 api_format，
+    // 因为按模型覆盖协议时 provider 级默认值可能仍是 Anthropic。
+    let needs_transform = super::providers::claude_api_format_needs_transform(&api_format);
 
     // Claude 特有：格式转换处理
     if needs_transform {

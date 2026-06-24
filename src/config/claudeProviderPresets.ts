@@ -57,6 +57,12 @@ export interface ProviderPreset {
     | "openai_responses"
     | "gemini_native";
 
+  // 按模型名/前缀覆盖 API 格式（可选）
+  modelApiFormats?: Record<
+    string,
+    "anthropic" | "openai_chat" | "openai_responses" | "gemini_native"
+  >;
+
   // 供应商类型标识（用于特殊供应商检测）
   // - "github_copilot": GitHub Copilot 供应商（需要 OAuth 认证）
   // - "codex_oauth": OpenAI Codex via ChatGPT Plus/Pro 反代（需要 OAuth 认证）

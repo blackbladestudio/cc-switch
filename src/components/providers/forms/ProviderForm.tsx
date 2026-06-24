@@ -23,6 +23,7 @@ import type {
   CodexChatReasoning,
   PromptCacheRoutingMode,
   ClaudeApiKeyField,
+  ModelApiOverride,
 } from "@/types";
 import {
   providerPresets,
@@ -486,9 +487,30 @@ function ProviderFormFull({
     return initialData?.meta?.apiFormat ?? "anthropic";
   });
 
+  const [localModelApiOverrides, setLocalModelApiOverrides] = useState<
+    Record<string, ModelApiOverride>
+  >(() => {
+    if (appId !== "claude") return {};
+    if (initialData?.meta?.modelApiOverrides) {
+      return initialData.meta.modelApiOverrides;
+    }
+    return Object.fromEntries(
+      Object.entries(initialData?.meta?.modelApiFormats ?? {}).map(
+        ([pattern, apiFormat]) => [pattern, { apiFormat }],
+      ),
+    );
+  });
+
   const handleApiFormatChange = useCallback((format: ClaudeApiFormat) => {
     setLocalApiFormat(format);
   }, []);
+
+  const handleModelApiOverridesChange = useCallback(
+    (overrides: Record<string, ModelApiOverride>) => {
+      setLocalModelApiOverrides(overrides);
+    },
+    [],
+  );
 
   const handleApiKeyFieldChange = useCallback(
     (field: ClaudeApiKeyField) => {
@@ -1542,6 +1564,24 @@ function ProviderFormFull({
 
     // 确定 providerType（新建时从预设获取，编辑时从现有数据获取）
     const providerType = presetProviderType || initialData?.meta?.providerType;
+    const cleanedModelApiOverrides = Object.fromEntries(
+      Object.entries(localModelApiOverrides)
+        .map(([pattern, override]) => {
+          const apiFormat = override.apiFormat;
+          const baseUrl = override.baseUrl?.trim();
+          return [
+            pattern.trim(),
+            {
+              ...(apiFormat ? { apiFormat } : {}),
+              ...(baseUrl ? { baseUrl } : {}),
+            },
+          ] as const;
+        })
+        .filter(
+          ([pattern, override]) =>
+            pattern.length > 0 && (override.apiFormat || override.baseUrl),
+        ),
+    );
 
     const nextMeta: ProviderMeta = {
       ...(baseMeta ?? {}),
@@ -1619,6 +1659,13 @@ function ProviderFormFull({
               ? "openai_responses"
               : localCodexApiFormat
             : undefined,
+      modelApiFormats: undefined,
+      modelApiOverrides:
+        appId === "claude" &&
+        category !== "official" &&
+        Object.keys(cleanedModelApiOverrides).length > 0
+          ? cleanedModelApiOverrides
+          : undefined,
       apiKeyField:
         appId === "claude" &&
         category !== "official" &&
@@ -1927,6 +1974,13 @@ function ProviderFormFull({
     } else {
       setLocalApiFormat("anthropic");
     }
+    setLocalModelApiOverrides(
+      Object.fromEntries(
+        Object.entries(preset.modelApiFormats ?? {}).map(
+          ([pattern, apiFormat]) => [pattern, { apiFormat }],
+        ),
+      ),
+    );
 
     setLocalApiKeyField(preset.apiKeyField ?? "ANTHROPIC_AUTH_TOKEN");
     setLocalIsFullUrl(false);
@@ -2263,6 +2317,8 @@ function ProviderFormFull({
               speedTestEndpoints={speedTestEndpoints}
               apiFormat={localApiFormat}
               onApiFormatChange={handleApiFormatChange}
+              modelApiOverrides={localModelApiOverrides}
+              onModelApiOverridesChange={handleModelApiOverridesChange}
               apiKeyField={localApiKeyField}
               onApiKeyFieldChange={handleApiKeyFieldChange}
               isFullUrl={localIsFullUrl}
