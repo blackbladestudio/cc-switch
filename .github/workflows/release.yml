@@ -140,11 +140,15 @@ jobs:
           # 因此不做任何 base64 重编码或文件路径转换——那些转换会改变字节序列，
           # 导致 Tauri 报 “incorrect updater private key password” 误报。
           echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
-          # 密码：本地构建未设此变量也能签名（密钥为空密码），这里保持一致——不注入。
+          # 密码：密钥生成时用了空密码（minisign 仍加密，密码为空串）。
+          # Tauri 在密码变量“不存在”时按无密码处理，会报 “incorrect password”；
+          # 必须显式注入空字符串才能解密。Secret 提供了就用 Secret 值，否则注入空串。
           if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" ]; then
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> $GITHUB_ENV
+          else
+            echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> $GITHUB_ENV
           fi
-          echo "✅ Tauri signing key prepared (raw secret value injected)"
+          echo "✅ Tauri signing key prepared (raw secret value + empty password injected)"
 
       - name: Import Apple signing certificate
         if: runner.os == 'macOS'
