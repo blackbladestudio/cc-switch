@@ -89,7 +89,9 @@ export function TeamSyncConflictDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("teamProvider.conflictTitle")}</DialogTitle>
-          <DialogDescription>{t("teamProvider.conflictDescription")}</DialogDescription>
+          <DialogDescription>
+            {t("teamProvider.conflictDescription")}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 max-h-[50vh] overflow-y-auto">

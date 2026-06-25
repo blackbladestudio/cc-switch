@@ -134,12 +134,15 @@ jobs:
             exit 1
           fi
           
-          # 直接把 Secret 原值注入 TAURI_SIGNING_PRIVATE_KEY。
-          # 本地构建验证过：TAURI_SIGNING_PRIVATE_KEY 设为私钥文件内容（单行 base64，
-          # 即 `cat cc-switch.key` 的输出）时 Tauri build 能正确签名。
-          # 因此不做任何 base64 重编码或文件路径转换——那些转换会改变字节序列，
-          # 导致 Tauri 报 “incorrect updater private key password” 误报。
-          echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
+          # Secret 存的是私钥文件内容的 base64（即 cat cc-switch.key 的输出再做一次 base64）。
+          # 这样无论粘贴时是否吞换行/空格，纯 [A-Za-z0-9+/=] 字符都不会丢字节。
+          # 这里解码一次，还原成“单行 base64 私钥内容”注入——与本地构建成功的格式完全一致。
+          DECODED_KEY=$(printf '%s' "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" | (base64 --decode 2>/dev/null || base64 -D 2>/dev/null))
+          if [ -z "$DECODED_KEY" ]; then
+            echo "❌ 解码 TAURI_SIGNING_PRIVATE_KEY 失败：Secret 不是合法 base64" >&2
+            exit 1
+          fi
+          echo "TAURI_SIGNING_PRIVATE_KEY=$DECODED_KEY" >> "$GITHUB_ENV"
           # 密码：密钥生成时用了空密码（minisign 仍加密，密码为空串）。
           # Tauri 在密码变量“不存在”时按无密码处理，会报 “incorrect password”；
           # 必须显式注入空字符串才能解密。Secret 提供了就用 Secret 值，否则注入空串。
@@ -148,7 +151,7 @@ jobs:
           else
             echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=" >> $GITHUB_ENV
           fi
-          echo "✅ Tauri signing key prepared (raw secret value + empty password injected)"
+          echo "✅ Tauri signing key prepared (decoded single-base64 key + empty password)"
 
       - name: Import Apple signing certificate
         if: runner.os == 'macOS'

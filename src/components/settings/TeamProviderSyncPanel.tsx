@@ -23,7 +23,8 @@ const DEFAULT_TEAM_REGISTRY_URL =
 export function TeamProviderSyncPanel() {
   const { t } = useTranslation();
   const { data: savedSettings } = useTeamProviderSyncSettings();
-  const { data: syncStatus, refetch: refetchStatus } = useTeamProviderSyncStatus();
+  const { data: syncStatus, refetch: refetchStatus } =
+    useTeamProviderSyncStatus();
   const saveSettings = useSaveTeamProviderSyncSettings();
   const applyRegistry = useApplyTeamRegistry();
   const cleanupRemoved = useCleanupRemovedTeamProviders();
@@ -49,7 +50,8 @@ export function TeamProviderSyncPanel() {
   }, [refetchStatus]);
 
   const pendingConflicts = useMemo(
-    () => syncStatus?.pendingConflicts ?? syncStatus?.lastSummary?.conflicts ?? [],
+    () =>
+      syncStatus?.pendingConflicts ?? syncStatus?.lastSummary?.conflicts ?? [],
     [syncStatus],
   );
 
@@ -130,7 +132,9 @@ export function TeamProviderSyncPanel() {
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">{t("teamProvider.sourceUrl")}</label>
+        <label className="text-sm font-medium">
+          {t("teamProvider.sourceUrl")}
+        </label>
         <Input
           value={sourceUrl}
           onChange={(event) => setSourceUrl(event.target.value)}
@@ -214,8 +218,14 @@ export function TeamProviderSyncPanel() {
           {t("teamProvider.cleanupRemoved")}
         </Button>
         {pendingConflicts.length > 0 && (
-          <Button type="button" variant="destructive" onClick={() => setConflictOpen(true)}>
-            {t("teamProvider.resolveConflicts", { count: pendingConflicts.length })}
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => setConflictOpen(true)}
+          >
+            {t("teamProvider.resolveConflicts", {
+              count: pendingConflicts.length,
+            })}
           </Button>
         )}
       </div>

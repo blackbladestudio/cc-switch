@@ -148,7 +148,9 @@ interface ClaudeFormFieldsProps {
 
   // Per-model API format / Base URL overrides
   modelApiOverrides?: Record<string, ModelApiOverride>;
-  onModelApiOverridesChange?: (overrides: Record<string, ModelApiOverride>) => void;
+  onModelApiOverridesChange?: (
+    overrides: Record<string, ModelApiOverride>,
+  ) => void;
 
   // Auth Field (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY)
   apiKeyField: ClaudeApiKeyField;
@@ -777,12 +779,12 @@ export function ClaudeFormFields({
             readOnlyTeamFields
               ? t("teamProvider.readOnlyFieldHint")
               : apiFormat === "openai_responses"
-              ? t("providerForm.apiHintResponses")
-              : apiFormat === "openai_chat"
-                ? t("providerForm.apiHintOAI")
-                : apiFormat === "gemini_native"
-                  ? t("providerForm.apiHintGeminiNative")
-                  : t("providerForm.apiHint")
+                ? t("providerForm.apiHintResponses")
+                : apiFormat === "openai_chat"
+                  ? t("providerForm.apiHintOAI")
+                  : apiFormat === "gemini_native"
+                    ? t("providerForm.apiHintGeminiNative")
+                    : t("providerForm.apiHint")
           }
           fullUrlHint={
             apiFormat === "gemini_native"

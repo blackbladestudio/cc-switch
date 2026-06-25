@@ -116,18 +116,17 @@ pub fn contains_plaintext_secret(value: &serde_json::Value) -> bool {
         serde_json::Value::Object(map) => {
             for (key, child) in map {
                 let lower = key.to_ascii_lowercase();
-                if lower == "apikey"
+                if (lower == "apikey"
                     || lower == "api_key"
                     || lower.ends_with("_api_key")
                     || lower.contains("auth_token")
                     || lower == "openai_api_key"
                     || lower == "anthropic_auth_token"
                     || lower == "anthropic_api_key"
-                    || lower == "gemini_api_key"
+                    || lower == "gemini_api_key")
+                    && child.as_str().is_some_and(|s| !s.trim().is_empty())
                 {
-                    if child.as_str().is_some_and(|s| !s.trim().is_empty()) {
-                        return true;
-                    }
+                    return true;
                 }
                 if contains_plaintext_secret(child) {
                     return true;

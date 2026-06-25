@@ -159,9 +159,7 @@ export function GeminiFormFields({
             defaultValue: "https://your-api-endpoint.com/",
           })}
           hint={
-            readOnlyTeamFields
-              ? t("teamProvider.readOnlyFieldHint")
-              : undefined
+            readOnlyTeamFields ? t("teamProvider.readOnlyFieldHint") : undefined
           }
           showManageButton={!readOnlyTeamFields}
           onManageClick={

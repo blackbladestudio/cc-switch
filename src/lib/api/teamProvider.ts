@@ -8,7 +8,9 @@ import type {
 
 export const teamProviderApi = {
   async getSyncSettings(): Promise<TeamProviderSyncSettings | null> {
-    return (await invoke("get_team_sync_settings")) as TeamProviderSyncSettings | null;
+    return (await invoke(
+      "get_team_sync_settings",
+    )) as TeamProviderSyncSettings | null;
   },
 
   async saveSyncSettings(
@@ -22,11 +24,15 @@ export const teamProviderApi = {
   },
 
   async fetchRegistry(sourceUrl: string): Promise<TeamProviderRegistry> {
-    return (await invoke("fetch_team_registry", { sourceUrl })) as TeamProviderRegistry;
+    return (await invoke("fetch_team_registry", {
+      sourceUrl,
+    })) as TeamProviderRegistry;
   },
 
   async applyRegistry(sourceUrl: string): Promise<TeamSyncApplySummary> {
-    return (await invoke("apply_team_registry", { sourceUrl })) as TeamSyncApplySummary;
+    return (await invoke("apply_team_registry", {
+      sourceUrl,
+    })) as TeamSyncApplySummary;
   },
 
   async resolveConflict(input: {

@@ -19,5 +19,7 @@ export function isTeamLockedField(
   fieldPath: string,
 ): boolean {
   if (!isTeamManagedReadOnly(provider)) return false;
-  return provider?.meta?.teamManaged?.lockedFields?.includes(fieldPath) ?? false;
+  return (
+    provider?.meta?.teamManaged?.lockedFields?.includes(fieldPath) ?? false
+  );
 }
