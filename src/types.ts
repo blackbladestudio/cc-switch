@@ -237,6 +237,22 @@ export interface ProviderMeta {
   providerType?: string;
   // GitHub Copilot 关联账号 ID（旧字段，保留兼容读取）
   githubAccountId?: string;
+  // 团队托管元数据（远程 registry 同步）
+  teamManaged?: TeamManagedMeta;
+}
+
+// 团队托管 provider 元数据
+export interface TeamManagedMeta {
+  teamId: string;
+  registryVersion: number;
+  registryUpdatedAt?: string;
+  sourceUrl?: string;
+  lockedFields?: string[];
+  lastSyncedAt?: number;
+  localOverride?: boolean;
+  removed?: boolean;
+  localFieldsHash?: string;
+  registryEntryId?: string;
 }
 
 // Skill 同步方式
@@ -337,6 +353,78 @@ export interface S3SyncSettings {
 }
 
 export type RemoteSnapshotLayout = "current" | "legacy";
+
+// ============================================================================
+// 团队 Provider Registry
+// ============================================================================
+
+export type TeamApiKeyPolicy = "local_required";
+
+export interface TeamRegistryModels {
+  claude?: ClaudeModelConfig;
+  claudeDesktop?: TeamClaudeDesktopConfig;
+  codex?: CodexModelConfig;
+  gemini?: GeminiModelConfig;
+}
+
+export interface TeamClaudeDesktopConfig {
+  mode?: "direct" | "proxy";
+  modelRoutes?: Record<string, ClaudeDesktopModelRoute>;
+}
+
+export interface TeamRegistryEntry {
+  id: string;
+  name: string;
+  apps: Array<"claude" | "claude-desktop" | "codex" | "gemini">;
+  baseUrl: string;
+  apiKeyPolicy: TeamApiKeyPolicy;
+  models?: TeamRegistryModels;
+  websiteUrl?: string;
+  notes?: string;
+  icon?: string;
+  iconColor?: string;
+  meta?: ProviderMeta;
+}
+
+export interface TeamProviderRegistry {
+  version: number;
+  teamId: string;
+  updatedAt: string;
+  providers: TeamRegistryEntry[];
+}
+
+export interface TeamSyncConflict {
+  providerId: string;
+  app: "claude" | "claude-desktop" | "codex" | "gemini";
+  registryEntryId: string;
+  message?: string;
+}
+
+export interface TeamSyncApplySummary {
+  created: number;
+  updated: number;
+  skipped: number;
+  removed: number;
+  conflicts: TeamSyncConflict[];
+  errors: string[];
+}
+
+export interface TeamSyncStatus {
+  lastSyncAt?: number | null;
+  lastSuccessAt?: number | null;
+  lastError?: string | null;
+  lastRegistryUpdatedAt?: string | null;
+  lastRemoteEtag?: string | null;
+  lastSummary?: TeamSyncApplySummary | null;
+  pendingConflicts?: TeamSyncConflict[];
+}
+
+export interface TeamProviderSyncSettings {
+  enabled?: boolean;
+  sourceUrl?: string;
+  autoSyncIntervalMinutes?: number;
+  status?: TeamSyncStatus;
+}
 
 // 远端快照信息（下载前预览）
 export interface RemoteSnapshotInfo {
@@ -439,6 +527,9 @@ export interface Settings {
 
   // ===== S3 同步设置 =====
   s3Sync?: S3SyncSettings;
+
+  // ===== 团队 Provider Registry 同步 =====
+  teamProviderSync?: TeamProviderSyncSettings;
 
   // ===== 备份策略设置 =====
   // Auto-backup interval in hours (0=disabled, default 24)

@@ -21,6 +21,7 @@ interface ModelInputWithFetchProps {
   isLoading: boolean;
   /** 传入时显示获取按钮；不传时只在有数据后显示下拉 */
   onFetch?: () => void;
+  disabled?: boolean;
 }
 
 export function ModelInputWithFetch({
@@ -31,6 +32,7 @@ export function ModelInputWithFetch({
   fetchedModels,
   isLoading,
   onFetch,
+  disabled = false,
 }: ModelInputWithFetchProps) {
   const { t } = useTranslation();
 
@@ -54,10 +56,16 @@ export function ModelInputWithFetch({
           placeholder={placeholder}
           autoComplete="off"
           className="flex-1"
+          disabled={disabled}
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="icon" className="shrink-0">
+            <Button
+              variant="outline"
+              size="icon"
+              className="shrink-0"
+              disabled={disabled}
+            >
               <ChevronDown className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
@@ -97,6 +105,7 @@ export function ModelInputWithFetch({
           placeholder={placeholder}
           autoComplete="off"
           className="flex-1"
+          disabled={disabled}
         />
         <Button variant="outline" size="icon" className="shrink-0" disabled>
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -117,6 +126,7 @@ export function ModelInputWithFetch({
           placeholder={placeholder}
           autoComplete="off"
           className="flex-1"
+          disabled={disabled}
         />
         <Button
           variant="outline"
@@ -124,6 +134,7 @@ export function ModelInputWithFetch({
           className="shrink-0"
           type="button"
           onClick={onFetch}
+          disabled={disabled}
           title={t("providerForm.fetchModels")}
         >
           <Download className="h-4 w-4" />
@@ -141,6 +152,7 @@ export function ModelInputWithFetch({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       autoComplete="off"
+      disabled={disabled}
     />
   );
 }

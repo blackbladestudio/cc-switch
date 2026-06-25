@@ -22,6 +22,7 @@ interface ModelApiOverridesEditorProps {
   defaultApiFormat: ClaudeApiFormat;
   /** Base URL 输入框占位符（通常用供应商当前 Base URL）。 */
   baseUrlPlaceholder?: string;
+  disabled?: boolean;
   /** 可选插槽：渲染在标题与规则列表之间（如默认协议选择器）。 */
   children?: ReactNode;
 }
@@ -35,6 +36,7 @@ export function ModelApiOverridesEditor({
   onChange,
   defaultApiFormat,
   baseUrlPlaceholder,
+  disabled = false,
   children,
 }: ModelApiOverridesEditorProps) {
   const { t } = useTranslation();
@@ -52,7 +54,10 @@ export function ModelApiOverridesEditor({
 
   const addRule = () => {
     if (Object.prototype.hasOwnProperty.call(overrides, "")) return;
-    onChange({ ...overrides, "": { apiFormat: defaultApiFormat, baseUrl: "" } });
+    onChange({
+      ...overrides,
+      "": { apiFormat: defaultApiFormat, baseUrl: "" },
+    });
   };
 
   const removeRule = (index: number) => {
@@ -81,6 +86,7 @@ export function ModelApiOverridesEditor({
           size="sm"
           className="h-8 gap-1.5 self-start"
           onClick={addRule}
+          disabled={disabled}
         >
           <Plus className="h-3.5 w-3.5" />
           {t("providerForm.modelApiFormatsAdd", { defaultValue: "添加规则" })}
@@ -130,6 +136,7 @@ export function ModelApiOverridesEditor({
                   defaultValue: "模型名或前缀（如 gpt-*）",
                 })}
                 autoComplete="off"
+                disabled={disabled}
               />
               <Select
                 value={override.apiFormat ?? FOLLOW_DEFAULT}
@@ -142,6 +149,7 @@ export function ModelApiOverridesEditor({
                   }
                   updateRule(index, pattern, next);
                 }}
+                disabled={disabled}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -170,6 +178,7 @@ export function ModelApiOverridesEditor({
                 }
                 placeholder={baseUrlPlaceholder || "https://api.example.com"}
                 autoComplete="off"
+                disabled={disabled}
               />
               <Button
                 type="button"
@@ -177,6 +186,7 @@ export function ModelApiOverridesEditor({
                 size="icon"
                 className="h-9 w-9 text-muted-foreground hover:text-destructive"
                 onClick={() => removeRule(index)}
+                disabled={disabled}
                 aria-label={t("common.delete", { defaultValue: "删除" })}
               >
                 <Trash2 className="h-4 w-4" />

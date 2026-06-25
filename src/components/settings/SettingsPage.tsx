@@ -16,6 +16,7 @@ import {
   ScrollText,
   HardDriveDownload,
   FlaskConical,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -45,6 +46,7 @@ import { DirectorySettings } from "@/components/settings/DirectorySettings";
 import { ImportExportSection } from "@/components/settings/ImportExportSection";
 import { BackupListSection } from "@/components/settings/BackupListSection";
 import { WebdavSyncSection } from "@/components/settings/WebdavSyncSection";
+import { TeamProviderSyncPanel } from "@/components/settings/TeamProviderSyncPanel";
 import { AboutSection } from "@/components/settings/AboutSection";
 import { ProxyTabContent } from "@/components/settings/ProxyTabContent";
 import { ConnectivityCheckConfigPanel } from "@/components/usage/ConnectivityCheckConfigPanel";
@@ -425,6 +427,28 @@ export function SettingsPage({
                               handleAutoSave(updates)
                             }
                           />
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem
+                        value="teamProvider"
+                        className="rounded-xl glass-card overflow-hidden"
+                      >
+                        <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+                          <div className="flex items-center gap-3">
+                            <Users className="h-5 w-5 text-blue-500" />
+                            <div className="text-left">
+                              <h3 className="text-base font-semibold">
+                                {t("teamProvider.title")}
+                              </h3>
+                              <p className="text-sm text-muted-foreground font-normal">
+                                {t("teamProvider.description")}
+                              </p>
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+                          <TeamProviderSyncPanel />
                         </AccordionContent>
                       </AccordionItem>
 

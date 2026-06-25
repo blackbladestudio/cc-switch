@@ -1,0 +1,48 @@
+{
+  "$schema": "./team-provider-registry.schema.json",
+  "version": 1,
+  "teamId": "example-team",
+  "updatedAt": "2026-06-24T00:00:00Z",
+  "providers": [
+    {
+      "id": "newapi",
+      "name": "Team NewAPI",
+      "apps": ["claude", "claude-desktop", "codex", "gemini"],
+      "baseUrl": "https://api.example.com/v1",
+      "apiKeyPolicy": "local_required",
+      "models": {
+        "claude": {
+          "model": "claude-sonnet-4-20250514"
+        },
+        "claudeDesktop": {
+          "mode": "proxy",
+          "modelRoutes": {
+            "claude-sonnet-4-6": {
+              "model": "claude-sonnet-4-20250514",
+              "labelOverride": "Team Sonnet"
+            },
+            "claude-opus-4-8": {
+              "model": "claude-opus-4-20250514",
+              "labelOverride": "Team Opus"
+            },
+            "claude-haiku-4-5": {
+              "model": "claude-3-5-haiku-20241022",
+              "labelOverride": "Team Haiku"
+            }
+          }
+        },
+        "codex": {
+          "model": "gpt-4o",
+          "reasoningEffort": "high"
+        },
+        "gemini": {
+          "model": "gemini-2.5-pro"
+        }
+      },
+      "websiteUrl": "https://example.com",
+      "meta": {
+        "apiFormat": "openai_chat"
+      }
+    }
+  ]
+}

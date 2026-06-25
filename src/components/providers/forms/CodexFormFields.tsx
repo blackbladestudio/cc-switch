@@ -116,6 +116,9 @@ interface CodexFormFieldsProps {
   onLocalProxyHeadersOverrideChange: (value: string) => void;
   localProxyBodyOverride: string;
   onLocalProxyBodyOverrideChange: (value: string) => void;
+
+  // Team-managed read-only fields (API key stays editable)
+  readOnlyTeamFields?: boolean;
 }
 
 type CodexCatalogRow = CodexCatalogModel & { rowId: string };
@@ -210,6 +213,7 @@ export function CodexFormFields({
   onLocalProxyHeadersOverrideChange,
   localProxyBodyOverride,
   onLocalProxyBodyOverrideChange,
+  readOnlyTeamFields = false,
 }: CodexFormFieldsProps) {
   const { t } = useTranslation();
 
@@ -541,10 +545,13 @@ export function CodexFormFields({
           onChange={onBaseUrlChange}
           placeholder={t("providerForm.codexApiEndpointPlaceholder")}
           hint={t("providerForm.codexApiHint")}
-          showFullUrlToggle
+          showFullUrlToggle={!readOnlyTeamFields}
           isFullUrl={isFullUrl}
-          onFullUrlChange={onFullUrlChange}
-          onManageClick={() => onEndpointModalToggle(true)}
+          onFullUrlChange={readOnlyTeamFields ? undefined : onFullUrlChange}
+          onManageClick={
+            readOnlyTeamFields ? undefined : () => onEndpointModalToggle(true)
+          }
+          disabled={readOnlyTeamFields}
         />
       )}
 
@@ -794,6 +801,15 @@ export function CodexFormFields({
                     </p>
                   </div>
                 )}
+
+                <Switch
+                  checked={needsLocalRouting}
+                  onCheckedChange={handleLocalRoutingChange}
+                  disabled={readOnlyTeamFields}
+                  aria-label={t("codexConfig.localRoutingToggle", {
+                    defaultValue: "需要本地路由映射",
+                  })}
+                />
               </div>
             )}
 
@@ -878,6 +894,7 @@ export function CodexFormFields({
                   <Switch
                     checked={supportsThinking}
                     onCheckedChange={handleReasoningThinkingChange}
+                    disabled={readOnlyTeamFields}
                     aria-label={t("codexConfig.reasoningModeToggle", {
                       defaultValue: "支持思考模式",
                     })}
@@ -901,6 +918,7 @@ export function CodexFormFields({
                   <Switch
                     checked={supportsEffort}
                     onCheckedChange={handleReasoningEffortChange}
+                    disabled={readOnlyTeamFields}
                     aria-label={t("codexConfig.reasoningEffortToggle", {
                       defaultValue: "支持思考等级",
                     })}
@@ -927,12 +945,13 @@ export function CodexFormFields({
                         defaultValue: "模型映射",
                       })}
                     </FormLabel>
-                    {renderCatalogActionButtons(
-                      handleAddCatalogRow,
-                      t("codexConfig.addCatalogModel", {
-                        defaultValue: "添加模型",
-                      }),
-                    )}
+                    {!readOnlyTeamFields &&
+                      renderCatalogActionButtons(
+                        handleAddCatalogRow,
+                        t("codexConfig.addCatalogModel", {
+                          defaultValue: "添加模型",
+                        }),
+                      )}
                   </div>
                   <p className="text-xs leading-relaxed text-muted-foreground">
                     {t("codexConfig.modelMappingHint", {
@@ -985,6 +1004,7 @@ export function CodexFormFields({
                           aria-label={t("codexConfig.catalogColumnDisplay", {
                             defaultValue: "菜单显示名",
                           })}
+                          disabled={readOnlyTeamFields}
                         />
                         <div className="flex gap-1">
                           <Input
@@ -1004,8 +1024,9 @@ export function CodexFormFields({
                               defaultValue: "实际请求模型",
                             })}
                             className="flex-1"
+                            disabled={readOnlyTeamFields}
                           />
-                          {fetchedModels.length > 0 && (
+                          {fetchedModels.length > 0 && !readOnlyTeamFields && (
                             <ModelDropdown
                               models={fetchedModels}
                               onSelect={(id) =>
@@ -1041,6 +1062,7 @@ export function CodexFormFields({
                           aria-label={t("codexConfig.catalogColumnContext", {
                             defaultValue: "上下文窗口",
                           })}
+                          disabled={readOnlyTeamFields}
                         />
                         <Button
                           type="button"
@@ -1048,6 +1070,7 @@ export function CodexFormFields({
                           size="icon"
                           className="h-9 w-9 text-muted-foreground hover:text-destructive"
                           onClick={() => handleRemoveCatalogRow(index)}
+                          disabled={readOnlyTeamFields}
                           title={t("common.delete", { defaultValue: "删除" })}
                         >
                           <Trash2 className="h-4 w-4" />

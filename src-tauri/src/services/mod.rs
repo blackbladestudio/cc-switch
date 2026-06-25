@@ -26,6 +26,7 @@ pub mod stream_check;
 pub mod subscription;
 pub mod subscription_grok;
 pub mod sync_protocol;
+pub mod team_provider;
 pub mod usage_cache;
 pub mod usage_stats;
 pub mod webdav;

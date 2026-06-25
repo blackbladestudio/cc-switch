@@ -1,0 +1,59 @@
+{
+  "$schema": "./team-provider-registry.schema.json",
+  "version": 1,
+  "teamId": "blackblade",
+  "updatedAt": "2026-06-24T12:30:00Z",
+  "providers": [
+    {
+      "id": "blackblade",
+      "name": "BlackBlade",
+      "apps": ["claude", "claude-desktop", "codex", "gemini"],
+      "baseUrl": "https://maas.miaoyun.net.cn",
+      "apiKeyPolicy": "local_required",
+      "websiteUrl": "https://www.miaoyun.net.cn",
+      "models": {
+        "claude": {
+          "model": "myco-4.8",
+          "haikuModel": "mycs-4.6",
+          "sonnetModel": "myco-4.6",
+          "opusModel": "myco-4.8"
+        },
+        "claudeDesktop": {
+          "mode": "proxy",
+          "modelRoutes": {
+            "claude-sonnet-4-6": {
+              "model": "glm-5.2",
+              "labelOverride": "GLM-5.2"
+            },
+            "claude-opus-4-8": {
+              "model": "myco-4.8",
+              "labelOverride": "Opus-4.8"
+            },
+            "claude-haiku-4-5": {
+              "model": "deepseek-v4-pro",
+              "labelOverride": "deepseek-v4-pro"
+            }
+          }
+        },
+        "codex": {
+          "model": "myog-5.5",
+          "reasoningEffort": "high"
+        },
+        "gemini": {
+          "model": "myog-5.5"
+        }
+      },
+      "meta": {
+        "apiFormat": "openai_chat",
+        "modelApiFormats": {
+          "myco-4.8": "anthropic",
+          "myco-4.6": "anthropic",
+          "mycs-4.6": "anthropic",
+          "myog-5.5": "openai_chat",
+          "deepseek-v4-pro": "openai_chat",
+          "glm-5.2": "openai_chat"
+        }
+      }
+    }
+  ]
+}

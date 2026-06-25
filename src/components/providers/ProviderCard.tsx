@@ -30,6 +30,10 @@ import {
 import { useProviderHealth } from "@/lib/query/failover";
 import { useUsageQuery } from "@/lib/query/queries";
 import { resolveProviderIcon } from "@/utils/providerIcon";
+import {
+  hasTeamLocalOverride,
+  isTeamManagedProvider,
+} from "@/utils/teamProviderUtils";
 
 interface DragHandleProps {
   attributes: DraggableAttributes;
@@ -365,6 +369,18 @@ export function ProviderCard({
               {isOmoSlim && (
                 <span className="inline-flex items-center rounded-md bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                   Slim
+                </span>
+              )}
+
+              {isTeamManagedProvider(provider) && (
+                <span className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                  {t("teamProvider.badgeManaged")}
+                </span>
+              )}
+
+              {hasTeamLocalOverride(provider) && (
+                <span className="inline-flex items-center rounded-md bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+                  {t("teamProvider.badgeLocalOverride")}
                 </span>
               )}
 

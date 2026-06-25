@@ -18,6 +18,7 @@ interface EndpointFieldProps {
   showFullUrlToggle?: boolean;
   isFullUrl?: boolean;
   onFullUrlChange?: (value: boolean) => void;
+  disabled?: boolean;
 }
 
 export function EndpointField({
@@ -34,6 +35,7 @@ export function EndpointField({
   showFullUrlToggle = false,
   isFullUrl = false,
   onFullUrlChange,
+  disabled = false,
 }: EndpointFieldProps) {
   const { t } = useTranslation();
 
@@ -99,6 +101,7 @@ export function EndpointField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete="off"
+        disabled={disabled}
       />
       {effectiveHint ? (
         <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg">

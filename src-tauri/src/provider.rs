@@ -547,6 +547,33 @@ pub struct ProviderMeta {
     /// 用于多账号支持，关联到特定的 GitHub 账号
     #[serde(rename = "githubAccountId", skip_serializing_if = "Option::is_none")]
     pub github_account_id: Option<String>,
+    /// 团队托管元数据（远程 registry 同步）
+    #[serde(rename = "teamManaged", skip_serializing_if = "Option::is_none")]
+    pub team_managed: Option<TeamManagedMeta>,
+}
+
+/// 团队托管 provider 元数据
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamManagedMeta {
+    pub team_id: String,
+    pub registry_version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_updated_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locked_fields: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_override: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_fields_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_entry_id: Option<String>,
 }
 
 /// 解析 Provider 级自定义 User-Agent 字符串（单一真理来源）。

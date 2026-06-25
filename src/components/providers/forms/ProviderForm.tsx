@@ -15,6 +15,7 @@ import {
 import { providersApi, settingsApi, type AppId } from "@/lib/api";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import type {
+  Provider,
   ProviderCategory,
   ProviderMeta,
   ClaudeApiFormat,
@@ -25,6 +26,7 @@ import type {
   ClaudeApiKeyField,
   ModelApiOverride,
 } from "@/types";
+import { isTeamManagedReadOnly } from "@/utils/teamProviderUtils";
 import {
   providerPresets,
   type ProviderPreset,
@@ -244,7 +246,15 @@ export interface ProviderFormProps {
 
 export function ProviderForm(props: ProviderFormProps) {
   if (props.appId === "claude-desktop") {
-    return <ClaudeDesktopProviderForm {...props} />;
+    const teamManagedReadOnly = isTeamManagedReadOnly(
+      props.initialData as Provider | undefined,
+    );
+    return (
+      <ClaudeDesktopProviderForm
+        {...props}
+        readOnlyTeamFields={teamManagedReadOnly}
+      />
+    );
   }
   if (props.appId === "grokbuild") {
     return <GrokBuildProviderForm {...props} />;
@@ -272,6 +282,9 @@ function ProviderFormFull({
 
   const { t } = useTranslation();
   const isEditMode = Boolean(initialData);
+  const teamManagedReadOnly = isTeamManagedReadOnly(
+    initialData as Provider | undefined,
+  );
   const queryClient = useQueryClient();
   const { data: settingsData } = useSettingsQuery();
   const showCommonConfigNotice =
@@ -2329,6 +2342,7 @@ function ProviderFormFull({
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
               onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              readOnlyTeamFields={teamManagedReadOnly}
             />
           )}
 
@@ -2384,6 +2398,7 @@ function ProviderFormFull({
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
               onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              readOnlyTeamFields={teamManagedReadOnly}
             />
           )}
 
@@ -2413,6 +2428,7 @@ function ProviderFormFull({
               model={geminiModel}
               onModelChange={handleGeminiModelChange}
               speedTestEndpoints={speedTestEndpoints}
+              readOnlyTeamFields={teamManagedReadOnly}
             />
           )}
 

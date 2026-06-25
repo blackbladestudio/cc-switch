@@ -46,6 +46,9 @@ interface GeminiFormFieldsProps {
 
   // Speed Test Endpoints
   speedTestEndpoints: EndpointCandidate[];
+
+  // Team-managed read-only fields (API key stays editable)
+  readOnlyTeamFields?: boolean;
 }
 
 export function GeminiFormFields({
@@ -70,6 +73,7 @@ export function GeminiFormFields({
   model,
   onModelChange,
   speedTestEndpoints,
+  readOnlyTeamFields = false,
 }: GeminiFormFieldsProps) {
   const { t } = useTranslation();
 
@@ -154,7 +158,16 @@ export function GeminiFormFields({
           placeholder={t("providerForm.apiEndpointPlaceholder", {
             defaultValue: "https://your-api-endpoint.com/",
           })}
-          onManageClick={() => onEndpointModalToggle(true)}
+          hint={
+            readOnlyTeamFields
+              ? t("teamProvider.readOnlyFieldHint")
+              : undefined
+          }
+          showManageButton={!readOnlyTeamFields}
+          onManageClick={
+            readOnlyTeamFields ? undefined : () => onEndpointModalToggle(true)
+          }
+          disabled={readOnlyTeamFields}
         />
       )}
 
@@ -170,7 +183,7 @@ export function GeminiFormFields({
               variant="outline"
               size="sm"
               onClick={handleFetchModels}
-              disabled={isFetchingModels}
+              disabled={isFetchingModels || readOnlyTeamFields}
               className="h-7 gap-1"
             >
               {isFetchingModels ? (
@@ -188,6 +201,7 @@ export function GeminiFormFields({
             placeholder="gemini-3.6-flash"
             fetchedModels={fetchedModels}
             isLoading={isFetchingModels}
+            disabled={readOnlyTeamFields}
           />
         </div>
       )}

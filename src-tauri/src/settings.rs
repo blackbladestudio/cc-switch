@@ -279,6 +279,83 @@ impl S3SyncSettings {
     }
 }
 
+/// 团队 Provider Registry 同步冲突
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSyncConflict {
+    pub provider_id: String,
+    pub app: String,
+    pub registry_entry_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// 团队 Provider Registry apply 摘要
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSyncApplySummary {
+    #[serde(default)]
+    pub created: u32,
+    #[serde(default)]
+    pub updated: u32,
+    #[serde(default)]
+    pub skipped: u32,
+    #[serde(default)]
+    pub removed: u32,
+    #[serde(default)]
+    pub conflicts: Vec<TeamSyncConflict>,
+    #[serde(default)]
+    pub errors: Vec<String>,
+}
+
+/// 团队 Provider Registry 同步状态
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamSyncStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_sync_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_registry_updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_remote_etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_summary: Option<TeamSyncApplySummary>,
+    #[serde(default)]
+    pub pending_conflicts: Vec<TeamSyncConflict>,
+}
+
+/// 团队 Provider Registry 同步设置
+pub const DEFAULT_TEAM_PROVIDER_REGISTRY_URL: &str =
+    "http://inner.blackblade.com/files/configs/team-blackblade-registry.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamProviderSyncSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub source_url: String,
+    #[serde(default)]
+    pub auto_sync_interval_minutes: u32,
+    #[serde(default)]
+    pub status: TeamSyncStatus,
+}
+
+impl Default for TeamProviderSyncSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            source_url: DEFAULT_TEAM_PROVIDER_REGISTRY_URL.to_string(),
+            auto_sync_interval_minutes: 0,
+            status: TeamSyncStatus::default(),
+        }
+    }
+}
+
 /// 本机自动迁移状态。
 ///
 /// 这里记录的是本机启动时执行过的一次性迁移；标记不随数据库同步。
@@ -465,6 +542,10 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub s3_sync: Option<S3SyncSettings>,
 
+    // ===== 团队 Provider Registry 同步 =====
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_provider_sync: Option<TeamProviderSyncSettings>,
+
     // ===== WebDAV 备份设置（旧版，保留向后兼容）=====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webdav_backup: Option<serde_json::Value>,
@@ -545,6 +626,7 @@ impl Default for AppSettings {
             skill_storage_location: SkillStorageLocation::default(),
             webdav_sync: None,
             s3_sync: None,
+            team_provider_sync: None,
             webdav_backup: None,
             backup_interval_hours: None,
             backup_retain_count: None,
@@ -1139,6 +1221,28 @@ pub fn update_s3_sync_status(status: WebDavSyncStatus) -> Result<(), AppError> {
     mutate_settings(|current| {
         if let Some(s3) = current.s3_sync.as_mut() {
             s3.status = status;
+        }
+    })
+}
+
+// ===== 团队 Provider Registry 同步设置 =====
+
+pub fn get_team_provider_sync_settings() -> Option<TeamProviderSyncSettings> {
+    settings_store().read().ok()?.team_provider_sync.clone()
+}
+
+pub fn set_team_provider_sync_settings(
+    settings: Option<TeamProviderSyncSettings>,
+) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        current.team_provider_sync = settings;
+    })
+}
+
+pub fn update_team_sync_status(status: TeamSyncStatus) -> Result<(), AppError> {
+    mutate_settings(|current| {
+        if let Some(sync) = current.team_provider_sync.as_mut() {
+            sync.status = status;
         }
     })
 }

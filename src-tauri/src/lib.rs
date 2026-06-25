@@ -1085,6 +1085,7 @@ pub fn run() {
                 app_state.db.clone(),
                 app.handle().clone(),
             );
+            crate::services::team_provider::auto_sync::start_worker(app.handle().clone());
             // 将同一个实例注入到全局状态，避免重复创建导致的不一致
             app.manage(app_state);
 
@@ -1429,6 +1430,13 @@ pub fn run() {
             commands::s3_sync_download,
             commands::s3_sync_save_settings,
             commands::s3_sync_fetch_remote_info,
+            commands::get_team_sync_settings,
+            commands::save_team_sync_settings,
+            commands::get_team_sync_status,
+            commands::fetch_team_registry,
+            commands::apply_team_registry,
+            commands::resolve_team_sync_conflict,
+            commands::cleanup_removed_team_providers,
             commands::save_file_dialog,
             commands::open_file_dialog,
             commands::open_zip_file_dialog,
