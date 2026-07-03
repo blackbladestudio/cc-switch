@@ -58,7 +58,10 @@ struct ParsedAssistantUsage {
 }
 
 /// 同步 Claude Code 会话日志到使用统计数据库
-pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppError> {
+pub fn sync_claude_session_logs(
+    db: &Database,
+    overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
+) -> Result<SessionSyncResult, AppError> {
     let projects_dir = get_claude_config_dir().join("projects");
     if !projects_dir.exists() {
         return Ok(SessionSyncResult {
@@ -82,7 +85,7 @@ pub fn sync_claude_session_logs(db: &Database) -> Result<SessionSyncResult, AppE
     for file_path in &jsonl_files {
         result.files_scanned += 1;
 
-        match sync_single_file(db, file_path) {
+        match sync_single_file(db, file_path, overlay) {
             Ok((imported, skipped)) => {
                 result.imported += imported;
                 result.skipped += skipped;
@@ -179,7 +182,11 @@ fn push_jsonl_children(dir: &Path, files: &mut Vec<PathBuf>) {
 }
 
 /// 同步单个 JSONL 文件，返回 (imported, skipped)
-fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppError> {
+fn sync_single_file(
+    db: &Database,
+    file_path: &Path,
+    overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
+) -> Result<(u32, u32), AppError> {
     let file_path_str = file_path.to_string_lossy().to_string();
 
     // 获取文件元数据
@@ -340,7 +347,7 @@ fn sync_single_file(db: &Database, file_path: &Path) -> Result<(u32, u32), AppEr
             msg.message_id
         );
 
-        match insert_session_log_entry(db, &request_id, msg) {
+        match insert_session_log_entry(db, &request_id, msg, overlay) {
             Ok(true) => imported += 1,
             Ok(false) => skipped += 1,
             Err(e) => {
@@ -411,6 +418,7 @@ fn insert_session_log_entry(
     db: &Database,
     request_id: &str,
     msg: &ParsedAssistantUsage,
+    overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
 ) -> Result<bool, AppError> {
     let conn = lock_conn!(db.conn);
 
@@ -452,7 +460,7 @@ fn insert_session_log_entry(
         message_id: None,
     };
 
-    let pricing = find_model_pricing_for_session(&conn, &msg.model);
+    let pricing = find_model_pricing_for_session(&conn, &msg.model, overlay);
     let multiplier = Decimal::from(1);
     let (input_cost, output_cost, cache_read_cost, cache_creation_cost, total_cost) = match pricing
     {
@@ -521,12 +529,17 @@ fn insert_session_log_entry(
     Ok(true)
 }
 
-/// 从 model_pricing 表查找模型定价（支持模糊匹配）
+/// 从 model_pricing 表查找模型定价（支持模糊匹配）。
+/// DB 未命中时回退内置定价覆盖层（glm-5.2 等随应用发布的模型）。
 fn find_model_pricing_for_session(
     conn: &rusqlite::Connection,
     model_id: &str,
+    overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
 ) -> Option<ModelPricing> {
-    find_model_pricing(conn, model_id)
+    if let Some(p) = find_model_pricing(conn, model_id) {
+        return Some(p);
+    }
+    overlay.and_then(|o| o.lookup(model_id))
 }
 
 /// 查询数据来源分布统计
@@ -685,7 +698,7 @@ mod tests {
             session_id: Some("session-1".to_string()),
         };
 
-        let inserted = insert_session_log_entry(&db, "session:msg_1", &msg)?;
+        let inserted = insert_session_log_entry(&db, "session:msg_1", &msg, None)?;
         assert!(!inserted);
 
         let conn = lock_conn!(db.conn);
@@ -771,7 +784,7 @@ mod tests {
         let empty = r#"{"type":"assistant","message":{"id":"msg_empty","model":"claude-opus-4-8","usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"timestamp":"2026-06-07T13:01:24Z","sessionId":"session-wf"}"#;
         fs::write(&file, format!("{billable}\n{empty}\n")).unwrap();
 
-        let (imported, _skipped) = sync_single_file(&db, &file)?;
+        let (imported, _skipped) = sync_single_file(&db, &file, None)?;
         assert_eq!(
             imported, 1,
             "有 cache 成本但无 stop_reason 的 message 必须被导入"

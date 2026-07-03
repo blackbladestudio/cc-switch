@@ -63,6 +63,8 @@ export interface ModelPricing {
   outputCostPerMillion: string;
   cacheReadCostPerMillion: string;
   cacheCreationCostPerMillion: string;
+  /** 定价来源："builtin"(DB 内置表，可编辑) | "app"(应用内置资源，只读) */
+  source?: "builtin" | "app";
 }
 
 export interface UsageSummary {

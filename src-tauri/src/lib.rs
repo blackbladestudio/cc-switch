@@ -1035,6 +1035,7 @@ pub fn run() {
 
                 // Session log usage sync: 启动时同步一次，之后每 60 秒检查
                 let db_for_session_sync = state.db.clone();
+                let user_pricing_for_sync = state.user_pricing.clone();
                 tauri::async_runtime::spawn(async move {
                     const SESSION_SYNC_INTERVAL_SECS: u64 = 60;
 
@@ -1045,15 +1046,22 @@ pub fn run() {
                     }
 
                     let db = &db_for_session_sync;
+                    let overlay = user_pricing_for_sync
+                        .read()
+                        .ok()
+                        .map(|g| g.clone());
 
                     // 首次同步
                     run_step(
                         "Usage cost startup backfill",
-                        db.backfill_missing_usage_costs(),
+                        db.backfill_missing_usage_costs_with_overlay(overlay.as_ref()),
                     );
                     run_step(
                         "Session usage initial sync",
-                        crate::services::session_usage::sync_claude_session_logs(db),
+                        crate::services::session_usage::sync_claude_session_logs(
+                            db,
+                            overlay.as_ref(),
+                        ),
                     );
                     run_step(
                         "Codex usage initial sync",
@@ -1077,7 +1085,10 @@ pub fn run() {
                         interval.tick().await;
                         run_step(
                             "Session usage periodic sync",
-                            crate::services::session_usage::sync_claude_session_logs(db),
+                            crate::services::session_usage::sync_claude_session_logs(
+                                db,
+                                overlay.as_ref(),
+                            ),
                         );
                         run_step(
                             "Codex usage periodic sync",
@@ -1356,6 +1367,7 @@ pub fn run() {
             commands::get_model_pricing,
             commands::update_model_pricing,
             commands::delete_model_pricing,
+            commands::get_pricing_rate,
             commands::check_provider_limits,
             // Session usage sync
             commands::sync_session_usage,

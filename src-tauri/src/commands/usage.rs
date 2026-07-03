@@ -120,6 +120,16 @@ pub fn get_request_detail(
     state.db.get_request_detail(&request_id)
 }
 
+/// 获取内置定价覆盖层的 CNY→内部单位(USD)汇率。
+/// 前端用于把后端返回的 USD 成本数值 × rate 换算成 CNY 显示。
+#[tauri::command]
+pub fn get_pricing_rate(state: State<'_, AppState>) -> Result<String, AppError> {
+    let overlay = state.user_pricing.read().map_err(|e| {
+        AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
+    })?;
+    Ok(overlay.rate.to_string())
+}
+
 /// 获取模型定价列表
 #[tauri::command]
 pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingInfo>, AppError> {
@@ -158,12 +168,70 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
             output_cost_per_million: row.get(3)?,
             cache_read_cost_per_million: row.get(4)?,
             cache_creation_cost_per_million: row.get(5)?,
+            source: "builtin".to_string(),
         })
     })?;
 
     let mut pricing = Vec::new();
     for row in rows {
         pricing.push(row?);
+    }
+
+    // 合并内置定价覆盖层（编译期嵌入资源）：覆盖同 model_id 的内置行，追加新增行。
+    // 覆盖层 CNY 价 ÷ rate 折成内部单位，与内置行口径一致。
+    // 匹配口径与计费路径（logger.get_model_pricing → overlay.lookup）保持一致：
+    // 用 model_pricing_candidates 生成候选名逐个比对，而非裸 model_id 精确匹配——
+    // 否则 DB 里 gpt-5.5-2025-08-07 这类带后缀的行不会被覆盖层 gpt-5.5 覆盖，
+    // 但计费时却能命中，导致 UI 显示价与实际计费价不一致。
+    let overlay = state.user_pricing.read().map_err(|e| {
+        AppError::Database(format!("读取用户定价覆盖层失败: {e}"))
+    })?;
+    if !overlay.is_empty() {
+        let rate = if overlay.rate.is_zero() {
+            Decimal::ONE
+        } else {
+            overlay.rate
+        };
+        let to_internal = |v: Decimal| (v / rate).to_string();
+        let mut consumed_overlay_keys: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        // 先按候选名把内置行替换成覆盖层价（命中即替换，与计费路径一致）
+        for info in pricing.iter_mut() {
+            let candidates = model_pricing_candidates(&info.model_id);
+            let hit = candidates
+                .iter()
+                .find_map(|c| overlay.models.get(c).map(|e| (c.clone(), e)));
+            if let Some((ov_key, entry)) = hit {
+                // 命中覆盖层：显示名沿用覆盖层，model_id 保持原 DB 行（用户看到的是
+                // 自己库里那条记录被内置价接管），source 标 app。
+                info.display_name = entry.display_name.clone();
+                info.input_cost_per_million = to_internal(entry.input);
+                info.output_cost_per_million = to_internal(entry.output);
+                info.cache_read_cost_per_million = to_internal(entry.cache_read);
+                info.cache_creation_cost_per_million = to_internal(entry.cache_creation);
+                info.source = "app".to_string();
+                // 记下已处理的覆盖层 key，避免下面重复追加
+                consumed_overlay_keys.insert(ov_key);
+            }
+        }
+
+        // 追加 DB 里没有、覆盖层独有的模型（如 glm-5.2）
+        for (model_id, entry) in &overlay.models {
+            if consumed_overlay_keys.contains(model_id) {
+                continue;
+            }
+            pricing.push(ModelPricingInfo {
+                model_id: model_id.clone(),
+                display_name: entry.display_name.clone(),
+                input_cost_per_million: to_internal(entry.input),
+                output_cost_per_million: to_internal(entry.output),
+                cache_read_cost_per_million: to_internal(entry.cache_read),
+                cache_creation_cost_per_million: to_internal(entry.cache_creation),
+                source: "app".to_string(),
+            });
+        }
+        pricing.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     }
 
     log::info!("成功获取 {} 条模型定价数据", pricing.len());
@@ -197,6 +265,21 @@ pub fn update_model_pricing(
             "显示名称不能为空",
             "Display name is required",
         ));
+    }
+
+    // 内置定价覆盖层行只读（随应用发布），禁止在 UI 内修改。
+    // 用候选名匹配，与计费/合并口径一致：带后缀的变体若被覆盖层接管同样禁改。
+    {
+        let overlay = state.user_pricing.read().map_err(|e| {
+            AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
+        })?;
+        if overlay.contains_model(&model_id) {
+            return Err(AppError::localized(
+                "usage.userPricingReadOnly",
+                format!("该模型定价为应用内置，不可在 UI 修改: {model_id}"),
+                format!("This model's pricing is built into the app and cannot be edited here: {model_id}"),
+            ));
+        }
     }
 
     for (label, value) in [
@@ -240,7 +323,17 @@ pub fn update_model_pricing(
         .map_err(|e| AppError::Database(format!("更新模型定价失败: {e}")))?;
     }
 
-    if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id) {
+    // 历史用量回填需用同一覆盖层重算（内置定价缺失模型的历史 0 成本行
+    // 也能补回来）。先取出覆盖层快照，避免持有锁跨 DB 写入。
+    let overlay_snapshot = state
+        .user_pricing
+        .read()
+        .map(|guard| guard.clone())
+        .ok();
+
+    if let Err(e) =
+        db.backfill_missing_usage_costs_for_model(&model_id, overlay_snapshot.as_ref())
+    {
         log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
     }
 
@@ -260,6 +353,20 @@ pub fn check_provider_limits(
 /// 删除模型定价
 #[tauri::command]
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
+    // 内置定价覆盖层行只读（随应用发布），禁止在 UI 内删除
+    {
+        let overlay = state.user_pricing.read().map_err(|e| {
+            AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
+        })?;
+        if overlay.contains_model(&model_id) {
+            return Err(AppError::localized(
+                "usage.userPricingReadOnly",
+                format!("该模型定价为应用内置，不可删除: {model_id}"),
+                format!("This model's pricing is built into the app and cannot be deleted: {model_id}"),
+            ));
+        }
+    }
+
     let db = state.db.clone();
     let conn = crate::database::lock_conn!(db.conn);
 
@@ -278,8 +385,12 @@ pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Res
 pub fn sync_session_usage(
     state: State<'_, AppState>,
 ) -> Result<crate::services::session_usage::SessionSyncResult, AppError> {
-    // 同步 Claude 会话日志
-    let mut result = crate::services::session_usage::sync_claude_session_logs(&state.db)?;
+    // 同步 Claude 会话日志（带内置定价覆盖层，glm 等覆盖层模型也能算出成本）
+    let overlay_snapshot = state.user_pricing.read().ok().map(|g| g.clone());
+    let mut result = crate::services::session_usage::sync_claude_session_logs(
+        &state.db,
+        overlay_snapshot.as_ref(),
+    )?;
 
     // 同步 Codex 使用数据
     match crate::services::session_usage_codex::sync_codex_usage(&state.db) {
@@ -341,4 +452,11 @@ pub struct ModelPricingInfo {
     pub output_cost_per_million: String,
     pub cache_read_cost_per_million: String,
     pub cache_creation_cost_per_million: String,
+    /// 定价来源："builtin"(DB 内置表，可在 UI 编辑) | "app"(应用内置资源，只读)
+    #[serde(default = "default_pricing_source")]
+    pub source: String,
+}
+
+fn default_pricing_source() -> String {
+    "builtin".to_string()
 }

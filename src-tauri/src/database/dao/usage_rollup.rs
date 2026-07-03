@@ -80,7 +80,7 @@ impl Database {
         // 之后；周期任务同理）。所以剪枝前先尽力回填一次。失败仅告警不阻断——
         // 否则一行损坏的定价数据会永久卡死日志清理。
         // 注意必须在 SAVEPOINT 之外调用：回填内部自己开顶层事务。
-        if let Err(e) = Self::backfill_missing_usage_costs_on_conn(&conn, None) {
+        if let Err(e) = Self::backfill_missing_usage_costs_on_conn(&conn, None, None) {
             log::warn!("Pre-prune cost backfill failed, pruning anyway: {e}");
         }
 

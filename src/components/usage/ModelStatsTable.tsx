@@ -8,7 +8,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useModelStats } from "@/lib/query/usage";
-import { fmtUsd } from "./format";
+import { fmtCost } from "./format";
+import { usePricingRate } from "./PricingRateContext";
 import type { UsageRangeSelection } from "@/types/usage";
 
 interface ModelStatsTableProps {
@@ -27,6 +28,7 @@ export function ModelStatsTable({
   refreshIntervalMs,
 }: ModelStatsTableProps) {
   const { t } = useTranslation();
+  const pricingRate = usePricingRate();
   const { data: stats, isLoading } = useModelStats(
     range,
     { appType, providerName, model },
@@ -82,10 +84,10 @@ export function ModelStatsTable({
                   {stat.totalTokens.toLocaleString()}
                 </TableCell>
                 <TableCell className="text-right">
-                  {fmtUsd(stat.totalCost, 4)}
+                  {fmtCost(stat.totalCost, pricingRate, 4)}
                 </TableCell>
                 <TableCell className="text-right">
-                  {fmtUsd(stat.avgCostPerRequest, 6)}
+                  {fmtCost(stat.avgCostPerRequest, pricingRate, 6)}
                 </TableCell>
               </TableRow>
             ))

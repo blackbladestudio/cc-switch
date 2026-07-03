@@ -21,14 +21,44 @@ export function fmtInt(
   return new Intl.NumberFormat(locale).format(Math.trunc(num));
 }
 
-export function fmtUsd(
+export function fmtCny(
   value: unknown,
   digits: number,
   fallback: string = "--",
 ): string {
   const num = parseFiniteNumber(value);
   if (num == null) return fallback;
-  return `$${num.toFixed(digits)}`;
+  return `¥${num.toFixed(digits)}`;
+}
+
+/**
+ * 把后端内部单位（USD 语义）的成本换算成 CNY 显示。
+ *
+ * 内部成本数值（total_cost_usd 等）是 USD 语义：DB 种子价本来就是 USD，
+ * 内置定价覆盖层也是 CNY ÷ rate 折成的 USD。前端展示统一 × rate 还原成
+ * CNY 再标 ¥，避免把 USD 数值直接贴 ¥ 符号导致量级偏低（约 7× 偏差）。
+ *
+ * `rate` 来自内置定价覆盖层（get_pricing_rate），字符串形式（rust_decimal）。
+ */
+export function fmtCost(
+  usdValue: unknown,
+  rate: unknown,
+  digits: number,
+  fallback: string = "--",
+): string {
+  const usd = parseFiniteNumber(usdValue);
+  const r = parseFiniteNumber(rate);
+  if (usd == null || r == null || r <= 0) return fallback;
+  return `¥${(usd * r).toFixed(digits)}`;
+}
+
+/** @deprecated 习惯用语保留；成本展示统一改用 fmtCny（人民币） */
+export function fmtUsd(
+  value: unknown,
+  digits: number,
+  fallback: string = "--",
+): string {
+  return fmtCny(value, digits, fallback);
 }
 
 function normalizeLanguageTag(language: string): string {

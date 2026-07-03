@@ -684,7 +684,8 @@ async fn log_usage_internal(
 ) {
     use super::usage::logger::UsageLogger;
 
-    let logger = UsageLogger::new(&state.db);
+    let overlay = state.user_pricing.read().unwrap().clone();
+    let logger = UsageLogger::new_with_overlay(&state.db, &overlay);
     let (multiplier, pricing_model_source) =
         logger.resolve_pricing_config(provider_id, app_type).await;
     let pricing_model = if pricing_model_source == PRICING_SOURCE_REQUEST {
@@ -1029,6 +1030,9 @@ mod tests {
             codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
             app_handle: None,
             failover_manager: Arc::new(FailoverSwitchManager::new(db)),
+            user_pricing: Arc::new(std::sync::RwLock::new(
+                crate::services::user_pricing::UserPricingConfig::default(),
+            )),
         }
     }
 
