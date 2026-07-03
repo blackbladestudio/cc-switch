@@ -7,6 +7,8 @@ import {
 } from "@/components/ui/dialog";
 import { useRequestDetail } from "@/lib/query/usage";
 import { getFreshInputTokens, isUnpricedUsage } from "@/types/usage";
+import { fmtCost } from "./format";
+import { usePricingRate } from "./PricingRateContext";
 
 interface RequestDetailPanelProps {
   requestId: string;
@@ -18,6 +20,7 @@ export function RequestDetailPanel({
   onClose,
 }: RequestDetailPanelProps) {
   const { t, i18n } = useTranslation();
+  const pricingRate = usePricingRate();
   const { data: request, isLoading } = useRequestDetail(requestId);
   const dateLocale =
     i18n.language === "zh"
@@ -222,7 +225,7 @@ export function RequestDetailPanel({
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.inputCostUsd).toFixed(6)}
+                  ¥{parseFloat(request.inputCostUsd).toFixed(6)}
                 </dd>
               </div>
               <div>
@@ -233,7 +236,7 @@ export function RequestDetailPanel({
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.outputCostUsd).toFixed(6)}
+                  ¥{parseFloat(request.outputCostUsd).toFixed(6)}
                 </dd>
               </div>
               <div>
@@ -244,7 +247,7 @@ export function RequestDetailPanel({
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.cacheReadCostUsd).toFixed(6)}
+                  ¥{parseFloat(request.cacheReadCostUsd).toFixed(6)}
                 </dd>
               </div>
               <div>
@@ -255,7 +258,7 @@ export function RequestDetailPanel({
                   </span>
                 </dt>
                 <dd className="font-mono">
-                  ${parseFloat(request.cacheCreationCostUsd).toFixed(6)}
+                  ¥{parseFloat(request.cacheCreationCostUsd).toFixed(6)}
                 </dd>
               </div>
               {/* 显示成本倍率（如果不等于1） */}
@@ -287,7 +290,7 @@ export function RequestDetailPanel({
                 >
                   {unpriced
                     ? t("usage.unpriced", "未定价")
-                    : `$${parseFloat(request.totalCostUsd).toFixed(6)}`}
+                    : fmtCost(request.totalCostUsd, pricingRate, 6)}
                 </dd>
               </div>
             </dl>

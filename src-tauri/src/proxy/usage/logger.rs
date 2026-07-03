@@ -90,11 +90,29 @@ pub struct RequestLog {
 /// 使用量记录器
 pub struct UsageLogger<'a> {
     db: &'a Database,
+    /// 内置定价覆盖层（CNY，编译期嵌入资源）。None 表示无覆盖层（测试/旧路径）。
+    user_pricing: Option<&'a crate::services::user_pricing::UserPricingConfig>,
 }
 
 impl<'a> UsageLogger<'a> {
+    #[allow(dead_code)]
     pub fn new(db: &'a Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            user_pricing: None,
+        }
+    }
+
+    /// 带 user pricing 覆盖层构造。生产路径从 AppState 注入。
+    /// 调用方负责在 logger 使用期间保持 `user_pricing` 存活。
+    pub fn new_with_overlay(
+        db: &'a Database,
+        user_pricing: &'a crate::services::user_pricing::UserPricingConfig,
+    ) -> Self {
+        Self {
+            db,
+            user_pricing: Some(user_pricing),
+        }
     }
 
     /// 记录成功的请求
@@ -334,6 +352,12 @@ impl<'a> UsageLogger<'a> {
 
     /// 获取模型定价
     pub fn get_model_pricing(&self, model_id: &str) -> Result<Option<ModelPricing>, AppError> {
+        // 优先命中内置定价覆盖层（编译期嵌入资源，CNY ÷ rate 折算）
+        if let Some(overlay) = self.user_pricing {
+            if let Some(pricing) = overlay.lookup(model_id) {
+                return Ok(Some(pricing));
+            }
+        }
         let conn = crate::database::lock_conn!(self.db.conn);
         let row = find_model_pricing_row(&conn, model_id)?;
         match row {
@@ -748,6 +772,47 @@ mod tests {
             |row| row.get(0),
         )?;
         assert_eq!(semantics, INPUT_TOKEN_SEMANTICS_TOTAL);
+        Ok(())
+    }
+
+    #[test]
+    fn test_overlay_pricing_resolves_model_missing_from_db() -> Result<(), AppError> {
+        // 验证 USG-002 修复：DB 里没有 glm-5.2，但 user pricing 覆盖层能命中，
+        // get_model_pricing 返回 Some，成本可计算，不会落到 USG-002 分支。
+        let db = Database::memory()?;
+
+        let mut models = std::collections::HashMap::new();
+        models.insert(
+            "glm-5.2".to_string(),
+            crate::services::user_pricing::UserPricingEntry {
+                display_name: "GLM-5.2".to_string(),
+                input: Decimal::from_str("1.4").unwrap(),
+                output: Decimal::from_str("4.4").unwrap(),
+                cache_read: Decimal::from_str("0.26").unwrap(),
+                cache_creation: Decimal::ZERO,
+            },
+        );
+        let overlay = crate::services::user_pricing::UserPricingConfig {
+            rate: Decimal::from_str("7.14").unwrap(),
+            models,
+        };
+
+        let logger = UsageLogger::new_with_overlay(&db, &overlay);
+
+        // DB 里没有 glm-5.2 —— 没有 overlay 时应返回 None
+        let logger_no_overlay = UsageLogger::new(&db);
+        assert!(logger_no_overlay.get_model_pricing("glm-5.2")?.is_none());
+
+        // 有 overlay 时应命中并返回折算后的定价
+        let pricing = logger
+            .get_model_pricing("glm-5.2")?
+            .expect("overlay 应命中 glm-5.2");
+        // 1.4 CNY ÷ 7.14 ≈ 0.1961
+        assert!(pricing.input_cost_per_million > Decimal::ZERO);
+        assert_eq!(
+            pricing.input_cost_per_million,
+            Decimal::from_str("1.4").unwrap() / Decimal::from_str("7.14").unwrap()
+        );
         Ok(())
     }
 }

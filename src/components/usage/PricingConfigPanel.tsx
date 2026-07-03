@@ -387,50 +387,64 @@ export function PricingConfigPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pricing.map((model) => (
-                    <TableRow key={model.modelId}>
-                      <TableCell className="font-mono text-sm">
-                        {model.modelId}
-                      </TableCell>
-                      <TableCell>{model.displayName}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        ${model.inputCostPerMillion}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        ${model.outputCostPerMillion}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        ${model.cacheReadCostPerMillion}
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-sm">
-                        ${model.cacheCreationCostPerMillion}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setIsAddingNew(false);
-                              setEditingModel(model);
-                            }}
-                            title={t("common.edit")}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeleteConfirm(model.modelId)}
-                            title={t("common.delete")}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {pricing.map((model) => {
+                    const isAppPricing = model.source === "app";
+                    return (
+                      <TableRow key={model.modelId}>
+                        <TableCell className="font-mono text-sm">
+                          {model.modelId}
+                          {isAppPricing && (
+                            <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                              {t("usage.builtinPricing", "内置")}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>{model.displayName}</TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          ¥{model.inputCostPerMillion}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          ¥{model.outputCostPerMillion}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          ¥{model.cacheReadCostPerMillion}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-sm">
+                          ¥{model.cacheCreationCostPerMillion}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {isAppPricing ? (
+                            <span className="text-xs text-muted-foreground">
+                              {t("common.readonly", "只读")}
+                            </span>
+                          ) : (
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setIsAddingNew(false);
+                                  setEditingModel(model);
+                                }}
+                                title={t("common.edit")}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteConfirm(model.modelId)}
+                                title={t("common.delete")}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

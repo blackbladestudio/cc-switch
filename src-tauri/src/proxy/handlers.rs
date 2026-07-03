@@ -2574,7 +2574,8 @@ fn log_forward_error(
 ) {
     use super::usage::logger::UsageLogger;
 
-    let logger = UsageLogger::new(&state.db);
+    let overlay = state.user_pricing.read().unwrap().clone();
+    let logger = UsageLogger::new_with_overlay(&state.db, &overlay);
     let status_code = map_proxy_error_to_status(error);
     let error_message = get_error_message(error);
     let request_id = uuid::Uuid::new_v4().to_string();
@@ -2620,7 +2621,8 @@ async fn log_usage(
         return;
     }
 
-    let logger = UsageLogger::new(&state.db);
+    let overlay = state.user_pricing.read().unwrap().clone();
+    let logger = UsageLogger::new_with_overlay(&state.db, &overlay);
 
     let (multiplier, pricing_model_source) =
         logger.resolve_pricing_config(provider_id, app_type).await;

@@ -48,6 +48,8 @@ pub struct ProxyState {
     pub app_handle: Option<tauri::AppHandle>,
     /// 故障转移切换管理器
     pub failover_manager: Arc<FailoverSwitchManager>,
+    /// 内置定价覆盖层（CNY，编译期嵌入资源），共享自 AppState
+    pub user_pricing: Arc<std::sync::RwLock<crate::services::user_pricing::UserPricingConfig>>,
 }
 
 /// 代理HTTP服务器
@@ -64,6 +66,7 @@ impl ProxyServer {
         config: ProxyConfig,
         db: Arc<Database>,
         app_handle: Option<tauri::AppHandle>,
+        user_pricing: Arc<std::sync::RwLock<crate::services::user_pricing::UserPricingConfig>>,
     ) -> Self {
         // 创建共享的 ProviderRouter（熔断器状态将跨所有请求保持）
         let provider_router = Arc::new(ProviderRouter::new(db.clone()));
@@ -81,6 +84,7 @@ impl ProxyServer {
             codex_chat_history: Arc::new(CodexChatHistoryStore::default()),
             app_handle,
             failover_manager,
+            user_pricing,
         };
 
         Self {

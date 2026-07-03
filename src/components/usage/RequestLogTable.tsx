@@ -27,11 +27,12 @@ import {
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { UsageDateRangePicker } from "./UsageDateRangePicker";
 import {
+  fmtCost,
   fmtInt,
-  fmtUsd,
   getLocaleFromLanguage,
   parseFiniteNumber,
 } from "./format";
+import { usePricingRate } from "./PricingRateContext";
 
 interface RequestLogTableProps {
   range: UsageRangeSelection;
@@ -53,6 +54,7 @@ export function RequestLogTable({
   onRangeChange,
 }: RequestLogTableProps) {
   const { t, i18n } = useTranslation();
+  const pricingRate = usePricingRate();
 
   // 应用/Provider/模型筛选已上移到 Dashboard 顶栏（全局生效）；
   // 这里只保留日志特有的状态码筛选。
@@ -278,7 +280,7 @@ export function RequestLogTable({
                           >
                             {unpriced
                               ? t("usage.unpriced", "未定价")
-                              : fmtUsd(log.totalCostUsd, 4)}
+                              : fmtCost(log.totalCostUsd, pricingRate, 4)}
                           </div>
                           {parseFiniteNumber(log.costMultiplier) != null &&
                             parseFiniteNumber(log.costMultiplier) !== 1 && (

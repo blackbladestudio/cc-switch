@@ -17,11 +17,12 @@ import {
   Zap,
 } from "lucide-react";
 import {
-  fmtUsd,
+  fmtCost,
   formatTokensShort,
   getResolvedLang,
   parseFiniteNumber,
 } from "./format";
+import { usePricingRate } from "./PricingRateContext";
 import {
   CACHE_INCLUSIVE_APP_TYPES,
   type AppType,
@@ -171,6 +172,7 @@ export function UsageHero({
 }: UsageHeroProps) {
   const { t, i18n } = useTranslation();
   const lang = getResolvedLang(i18n);
+  const pricingRate = usePricingRate();
 
   const { data, isLoading } = useUsageSummaryByApp(
     range,
@@ -301,7 +303,9 @@ export function UsageHero({
                     {t("usage.totalCost")}
                   </span>
                   <span className="font-semibold text-green-500 text-sm tabular-nums">
-                    {totalCost == null ? "--" : fmtUsd(totalCost, 4)}
+                    {totalCost == null
+                      ? "--"
+                      : fmtCost(totalCost, pricingRate, 4)}
                   </span>
                 </div>
               </div>

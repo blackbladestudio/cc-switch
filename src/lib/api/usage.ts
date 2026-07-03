@@ -168,6 +168,11 @@ export const usageApi = {
     return invoke("delete_model_pricing", { modelId });
   },
 
+  // 内置定价覆盖层的 CNY→USD 汇率（前端成本显示 × rate 转 CNY）
+  getPricingRate: async (): Promise<string> => {
+    return invoke("get_pricing_rate");
+  },
+
   checkProviderLimits: async (
     providerId: string,
     appType: string,

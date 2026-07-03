@@ -1621,7 +1621,7 @@ impl Database {
 
         for row in rows {
             let mut log = row?;
-            Self::maybe_backfill_log_costs(&conn, &mut log, &mut pricing_cache)?;
+            Self::maybe_backfill_log_costs(&conn, &mut log, &mut pricing_cache, None)?;
             logs.push(log);
         }
 
@@ -1658,7 +1658,7 @@ impl Database {
         match result {
             Ok(mut detail) => {
                 let mut pricing_cache = HashMap::new();
-                Self::maybe_backfill_log_costs(&conn, &mut detail, &mut pricing_cache)?;
+                Self::maybe_backfill_log_costs(&conn, &mut detail, &mut pricing_cache, None)?;
                 Ok(Some(detail))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
@@ -1779,24 +1779,47 @@ struct PricingInfo {
 
 impl Database {
     /// Recalculate stored zero-cost usage rows once pricing becomes available.
+    /// 无覆盖层版本（仅 DB 定价）；生产启动路径请用 `backfill_missing_usage_costs_with_overlay`。
+    #[allow(dead_code)]
     pub(crate) fn backfill_missing_usage_costs(&self) -> Result<u64, AppError> {
         let conn = lock_conn!(self.conn);
-        Self::backfill_missing_usage_costs_on_conn(&conn, None)
+        Self::backfill_missing_usage_costs_on_conn(&conn, None, None)
+    }
+
+    /// 与 `backfill_missing_usage_costs` 相同，但传入内置定价覆盖层。
+    /// 启动回填使用：内置资源里新增的模型（如 glm-5.2）的历史 0 成本行
+    /// 才能按覆盖层价补算回来。
+    pub(crate) fn backfill_missing_usage_costs_with_overlay(
+        &self,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
+    ) -> Result<u64, AppError> {
+        let conn = lock_conn!(self.conn);
+        Self::backfill_missing_usage_costs_on_conn(&conn, None, overlay)
     }
 
     /// 仅回填指定 model_id 相关的零成本行；用于单条定价更新后的精准回填。
     pub(crate) fn backfill_missing_usage_costs_for_model(
         &self,
         model_id: &str,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
     ) -> Result<u64, AppError> {
         let conn = lock_conn!(self.conn);
-        Self::backfill_missing_usage_costs_on_conn(&conn, Some(model_id))
+        Self::backfill_missing_usage_costs_on_conn(&conn, Some(model_id), overlay)
     }
 
     pub(crate) fn backfill_missing_usage_costs_on_conn(
         conn: &Connection,
         only_model_id: Option<&str>,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
     ) -> Result<u64, AppError> {
+        // 回填两类历史行：
+        //  (A) total_cost ≤ 0 但有计费 token：早期未算成本的行（原逻辑）。
+        //  (B) cache_read/cache_creation 有 token 但对应 cost ≤ 0，且 total_cost > 0：
+        //      这是内置定价覆盖层 camelCase 反序列化 bug 的受害者——input/output
+        //      已按覆盖层价正确计费（total>0），但 cacheRead 字段被丢弃导致
+        //      cache_read_cost=0。修复反序列化后需重算这部分，否则历史总额
+        //      永久偏低。cache_read/cache_creation 的 cost 单独缺失不会触发 (A)
+        //      的 total≤0 条件，必须单独捞。
         const BASE_SQL: &str =
             "SELECT request_id, provider_id, NULL AS provider_name, app_type, model, request_model,
                         cost_multiplier,
@@ -1806,9 +1829,13 @@ impl Database {
                         first_token_ms, duration_ms, status_code, error_message, created_at,
                         data_source, pricing_model, input_token_semantics
              FROM proxy_request_logs
-             WHERE CAST(total_cost_usd AS REAL) <= 0
-               AND (input_tokens > 0 OR output_tokens > 0
-                    OR cache_read_tokens > 0 OR cache_creation_tokens > 0)";
+             WHERE (CAST(total_cost_usd AS REAL) <= 0
+                    AND (input_tokens > 0 OR output_tokens > 0
+                         OR cache_read_tokens > 0 OR cache_creation_tokens > 0))
+                OR (CAST(total_cost_usd AS REAL) > 0
+                    AND ((cache_read_tokens > 0 AND CAST(cache_read_cost_usd AS REAL) <= 0)
+                         OR (cache_creation_tokens > 0
+                             AND CAST(cache_creation_cost_usd AS REAL) <= 0)))";
 
         let mut logs = {
             let mut stmt = conn.prepare(BASE_SQL)?;
@@ -1836,7 +1863,7 @@ impl Database {
         let mut updated = 0u64;
         let mut pricing_cache = HashMap::new();
         for log in &mut logs {
-            if Self::maybe_backfill_log_costs(&tx, log, &mut pricing_cache)? {
+            if Self::maybe_backfill_log_costs(&tx, log, &mut pricing_cache, overlay)? {
                 updated += 1;
             }
         }
@@ -1855,6 +1882,7 @@ impl Database {
         conn: &Connection,
         log: &mut RequestLogDetail,
         pricing_cache: &mut HashMap<String, PricingInfo>,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
     ) -> Result<bool, AppError> {
         let existing_cost = rust_decimal::Decimal::from_str(&log.total_cost_usd)
             .unwrap_or(rust_decimal::Decimal::ZERO);
@@ -1864,11 +1892,28 @@ impl Database {
             || log.cache_read_tokens > 0
             || log.cache_creation_tokens > 0;
 
-        if has_cost || !has_usage {
+        // 检测「缓存维度有 token 但成本为 0」——内置定价覆盖层 camelCase
+        // 反序列化 bug 的典型症状：input/output 已正确计费(total>0)，但
+        // cacheRead 被丢弃导致 cache_read_cost=0。这类行 total>0 会被原 has_cost
+        // 拦下，必须单独放行才能重算。详见 BASE_SQL 的 (B) 分支。
+        let cache_read_underbilled = log.cache_read_tokens > 0
+            && rust_decimal::Decimal::from_str(&log.cache_read_cost_usd)
+                .unwrap_or(rust_decimal::Decimal::ZERO)
+                <= rust_decimal::Decimal::ZERO;
+        let cache_creation_underbilled = log.cache_creation_tokens > 0
+            && rust_decimal::Decimal::from_str(&log.cache_creation_cost_usd)
+                .unwrap_or(rust_decimal::Decimal::ZERO)
+                <= rust_decimal::Decimal::ZERO;
+        let needs_cache_recompute = has_cost && (cache_read_underbilled || cache_creation_underbilled);
+
+        // 重算条件：无成本但有计费 token（原逻辑），或缓存维度漏算（B 路径）。
+        // 已正确计费的行（has_cost 且无漏算）跳过，避免无谓重写。
+        let should_recompute = (!has_cost && has_usage) || needs_cache_recompute;
+        if !should_recompute {
             return Ok(false);
         }
 
-        let pricing = match Self::get_log_model_pricing_cached(conn, pricing_cache, log)? {
+        let pricing = match Self::get_log_model_pricing_cached(conn, pricing_cache, log, overlay)? {
             Some(info) => info,
             None => return Ok(false),
         };
@@ -1947,9 +1992,25 @@ impl Database {
         conn: &Connection,
         cache: &mut HashMap<String, PricingInfo>,
         model: &str,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
     ) -> Result<Option<PricingInfo>, AppError> {
         if let Some(info) = cache.get(model) {
             return Ok(Some(info.clone()));
+        }
+
+        // 内置定价覆盖层优先（编译期嵌入资源，CNY ÷ rate 折算）。
+        // 命中即缓存并返回，不落 DB。
+        if let Some(overlay) = overlay {
+            if let Some(pricing) = overlay.lookup(model) {
+                let info = PricingInfo {
+                    input: pricing.input_cost_per_million,
+                    output: pricing.output_cost_per_million,
+                    cache_read: pricing.cache_read_cost_per_million,
+                    cache_creation: pricing.cache_creation_cost_per_million,
+                };
+                cache.insert(model.to_string(), info.clone());
+                return Ok(Some(info));
+            }
         }
 
         let row = find_model_pricing_row(conn, model)?;
@@ -1976,6 +2037,7 @@ impl Database {
         conn: &Connection,
         cache: &mut HashMap<String, PricingInfo>,
         log: &RequestLogDetail,
+        overlay: Option<&crate::services::user_pricing::UserPricingConfig>,
     ) -> Result<Option<PricingInfo>, AppError> {
         // 写入时的计价基准已落库（v11+）：回填只按它重算，找不到就保持 0 成本
         // 等补价。不能换用 model/request_model 猜——路由接管 + request 计价模式下
@@ -1987,10 +2049,10 @@ impl Database {
             .as_deref()
             .filter(|pm| !is_placeholder_pricing_model(pm))
         {
-            return Self::get_model_pricing_cached(conn, cache, pricing_model);
+            return Self::get_model_pricing_cached(conn, cache, pricing_model, overlay);
         }
 
-        if let Some(pricing) = Self::get_model_pricing_cached(conn, cache, &log.model)? {
+        if let Some(pricing) = Self::get_model_pricing_cached(conn, cache, &log.model, overlay)? {
             return Ok(Some(pricing));
         }
 
@@ -2010,7 +2072,7 @@ impl Database {
             return Ok(None);
         }
 
-        Self::get_model_pricing_cached(conn, cache, request_model)
+        Self::get_model_pricing_cached(conn, cache, request_model, overlay)
     }
 }
 
@@ -2127,7 +2189,7 @@ fn query_model_pricing_prefix(
     .map_err(|e| AppError::Database(format!("查询模型前缀定价失败: {e}")))
 }
 
-fn model_pricing_candidates(model_id: &str) -> Vec<String> {
+pub(crate) fn model_pricing_candidates(model_id: &str) -> Vec<String> {
     let cleaned = clean_model_id_for_pricing(model_id);
     if is_placeholder_pricing_model(&cleaned) {
         return Vec::new();
@@ -2155,6 +2217,12 @@ fn model_pricing_candidates(model_id: &str) -> Vec<String> {
         }
         if let Some(stripped) = strip_reasoning_effort_suffix(&candidate) {
             queue.push(stripped);
+        }
+        if let Some(stripped) = strip_cache_variant_suffix(&candidate) {
+            queue.push(stripped);
+        }
+        if let Some(reordered) = normalize_claude_family_word_order(&candidate) {
+            queue.push(reordered);
         }
         if candidate.starts_with("claude-") && candidate.contains('.') {
             queue.push(candidate.replace('.', "-"));
@@ -2312,6 +2380,42 @@ fn strip_reasoning_effort_suffix(model_id: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// 把中转商的 `claude-{ver}-{family}` 词序归一到 DB 种子价的 `claude-{family}-{ver}`。
+///
+/// 例：`claude-4.8-opus` → `claude-opus-4.8` →（候选链里 `.`→`-`）`claude-opus-4-8`，
+/// 命中 DB 的 `claude-opus-4-8`。OpenRouter 等用 `anthropic/claude-4.8-opus` 命名，
+/// 去前缀后落在本规则上。仅当 family 在末尾时触发，规范序（`claude-opus-4-8`）
+/// 不受影响。
+fn normalize_claude_family_word_order(model_id: &str) -> Option<String> {
+    let rest = model_id.strip_prefix("claude-")?;
+    // family 必须在末尾，避免误伤 claude-opus-4-8（规范序，rest = opus-4-8）。
+    for family in ["opus", "sonnet", "haiku"] {
+        let family_suffix = format!("-{family}");
+        if let Some(mid) = rest.strip_suffix(&family_suffix) {
+            // mid 形如 "4.8" / "4-8" / "3-7"；至少含一个数字段。
+            if mid.is_empty() || !mid.chars().any(|c| c.is_ascii_digit()) {
+                continue;
+            }
+            return Some(format!("claude-{family}-{mid}"));
+        }
+    }
+    None
+}
+
+/// 剥离 `-cache` 后缀，让缓存变体命中基础模型的定价。
+///
+/// 例：`deepseek-v4-pro-cache` → `deepseek-v4-pro`。部分中转商对同一模型提供
+/// `-cache` 变体（价格不变），归一化后才能匹配覆盖层/DB 里的基础 key。
+/// 仅剥离末尾的 `-cache`，不影响名字中含 cache 的模型。
+fn strip_cache_variant_suffix(model_id: &str) -> Option<String> {
+    let stripped = model_id.strip_suffix("-cache")?;
+    if stripped.is_empty() {
+        None
+    } else {
+        Some(stripped.to_string())
+    }
 }
 
 fn should_try_pricing_prefix_match(model_id: &str) -> bool {
@@ -2877,7 +2981,7 @@ mod tests {
 
         // 按 pricing_model 也能定位到该行（model/request_model 都不是 kimi-k2-novel）
         assert_eq!(
-            db.backfill_missing_usage_costs_for_model("kimi-k2-novel")?,
+            db.backfill_missing_usage_costs_for_model("kimi-k2-novel", None)?,
             1
         );
 
@@ -2983,6 +3087,166 @@ mod tests {
         assert_eq!(input_cost, "0.000100");
         assert_eq!(cache_read_cost, "0.000020");
         assert_eq!(total_cost, "0.000120");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_backfill_uses_overlay_pricing_for_model_missing_from_db() -> Result<(), AppError> {
+        // 验证问题2修复：DB 里没有 glm-5.2 定价，但内置定价覆盖层有。
+        // 启动回填（backfill_missing_usage_costs_with_overlay）必须能按覆盖层价
+        // 把历史 0 成本行补算回来，而不是保持 0。
+        let db = Database::memory()?;
+
+        // 确认 DB 没有 glm-5.2 定价
+        {
+            let conn = lock_conn!(db.conn);
+            let n: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM model_pricing WHERE model_id = 'glm-5.2'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_eq!(n, 0, "前置：DB 不应有 glm-5.2 定价");
+        }
+
+        {
+            let conn = lock_conn!(db.conn);
+            insert_usage_log(
+                &conn,
+                "glm-5-2-overlay-backfill",
+                "claude",
+                "_session",
+                "glm-5.2",
+                "session_log",
+                1000,
+                1_000_000,
+                1_000_000,
+                0,
+                0,
+                200,
+                "0",
+            )?;
+        }
+
+        // 构造覆盖层：glm-5.2 input=1.4 CNY，rate=7.14
+        let mut models = std::collections::HashMap::new();
+        models.insert(
+            "glm-5.2".to_string(),
+            crate::services::user_pricing::UserPricingEntry {
+                display_name: "GLM-5.2".to_string(),
+                input: rust_decimal::Decimal::from_str("1.4").unwrap(),
+                output: rust_decimal::Decimal::from_str("4.4").unwrap(),
+                cache_read: rust_decimal::Decimal::from_str("0.26").unwrap(),
+                cache_creation: rust_decimal::Decimal::ZERO,
+            },
+        );
+        let overlay = crate::services::user_pricing::UserPricingConfig {
+            rate: rust_decimal::Decimal::from_str("7.14").unwrap(),
+            models,
+        };
+
+        // 不带覆盖层：保持 0（DB 无定价，回填无可补）
+        assert_eq!(db.backfill_missing_usage_costs()?, 0);
+
+        // 带覆盖层：命中 glm-5.2，补算出非 0 成本
+        assert_eq!(
+            db.backfill_missing_usage_costs_with_overlay(Some(&overlay))?,
+            1
+        );
+
+        let conn = lock_conn!(db.conn);
+        let total_cost: String = conn.query_row(
+            "SELECT total_cost_usd FROM proxy_request_logs
+             WHERE request_id = 'glm-5-2-overlay-backfill'",
+            [],
+            |row| row.get(0),
+        )?;
+        let total =
+            rust_decimal::Decimal::from_str(&total_cost).unwrap_or(rust_decimal::Decimal::ZERO);
+        assert!(
+            total > rust_decimal::Decimal::ZERO,
+            "覆盖层命中后应补算出非 0 成本，实际: {total_cost}"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_backfill_recomputes_rows_with_cache_tokens_but_zero_cache_cost() -> Result<(), AppError> {
+        // 回归：内置定价覆盖层 camelCase 反序列化 bug 的受害者行——
+        // input/output 已按覆盖层价正确计费（total>0），但 cacheRead 被丢弃
+        // 导致 cache_read_cost=0。启动回填的 (A) 分支（total<=0）捞不到这类行，
+        // 必须靠 (B) 分支（cache tokens>0 且 cache cost<=0）重算。
+        let db = Database::memory()?;
+
+        // 模拟 bug 受害者行：glm-5.2，1M cache_read tokens，cache_read_cost=0，
+        // 但 input/output 已计费使 total>0。
+        {
+            let conn = lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, request_model,
+                    input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                    input_cost_usd, output_cost_usd, cache_read_cost_usd, cache_creation_cost_usd,
+                    total_cost_usd, latency_ms, status_code, created_at, data_source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 200, 0, 'session_log')",
+                params![
+                    "glm-5-2-cache-underbilled",
+                    "_session",
+                    "claude",
+                    "glm-5.2",
+                    "glm-5.2",
+                    1000,            // input_tokens
+                    500,             // output_tokens
+                    1_000_000,       // cache_read_tokens
+                    0,               // cache_creation_tokens
+                    "0.000140",      // input_cost_usd (已计费)
+                    "0.000220",      // output_cost_usd (已计费)
+                    "0.000000",      // cache_read_cost_usd ← bug：本应非 0
+                    "0.000000",      // cache_creation_cost_usd
+                    "0.000360",      // total_cost_usd > 0
+                ],
+            )?;
+        }
+
+        // 覆盖层：glm-5.2 cacheRead=1.6 CNY，rate=7.14 → cache_read_cost_per_million≈0.2241
+        let mut models = std::collections::HashMap::new();
+        models.insert(
+            "glm-5.2".to_string(),
+            crate::services::user_pricing::UserPricingEntry {
+                display_name: "GLM-5.2".to_string(),
+                input: rust_decimal::Decimal::from_str("6.4").unwrap(),
+                output: rust_decimal::Decimal::from_str("22.4").unwrap(),
+                cache_read: rust_decimal::Decimal::from_str("1.6").unwrap(),
+                cache_creation: rust_decimal::Decimal::ZERO,
+            },
+        );
+        let overlay = crate::services::user_pricing::UserPricingConfig {
+            rate: rust_decimal::Decimal::from_str("7.14").unwrap(),
+            models,
+        };
+
+        // (B) 分支应捞出并重算这行
+        assert_eq!(
+            db.backfill_missing_usage_costs_with_overlay(Some(&overlay))?,
+            1,
+            "cache_read 漏算的行应被重算"
+        );
+
+        let conn = lock_conn!(db.conn);
+        let cache_read_cost: String = conn.query_row(
+            "SELECT cache_read_cost_usd FROM proxy_request_logs
+             WHERE request_id = 'glm-5-2-cache-underbilled'",
+            [],
+            |row| row.get(0),
+        )?;
+        let cr = rust_decimal::Decimal::from_str(&cache_read_cost)
+            .unwrap_or(rust_decimal::Decimal::ZERO);
+        // 1M × 1.6 CNY / 7.14 / 1M ≈ 0.2241
+        assert!(
+            cr > rust_decimal::Decimal::from_str("0.2").unwrap(),
+            "重算后 cache_read_cost 应 ≈ 0.2241，实际: {cache_read_cost}"
+        );
 
         Ok(())
     }
@@ -4268,5 +4532,59 @@ mod tests {
         assert!(result.is_none(), "不应该匹配不存在的模型");
 
         Ok(())
+    }
+
+    #[test]
+    fn test_claude_family_word_order_normalization_matches_db() -> Result<(), AppError> {
+        // 回归：OpenRouter 等用 anthropic/claude-4.8-opus（version 在前，family 在末尾），
+        // 去前缀后是 claude-4.8-opus，词序与 DB 种子 key claude-opus-4-8 不同，
+        // 旧逻辑匹配不上 → 成本记 0。归一化后应命中。
+        let db = Database::memory()?;
+        let conn = lock_conn!(db.conn);
+        let result = find_model_pricing_row(&conn, "anthropic/claude-4.8-opus")?;
+        assert!(
+            result.is_some(),
+            "claude-4.8-opus 词序归一化后应命中 claude-opus-4-8"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_cache_variant_suffix_stripped_matches_overlay_key() {
+        use crate::services::user_pricing::UserPricingConfig;
+        // deepseek-v4-pro-cache 剥离 -cache 后应命中覆盖层的 deepseek-v4-pro。
+        let mut models = std::collections::HashMap::new();
+        models.insert(
+            "deepseek-v4-pro".to_string(),
+            crate::services::user_pricing::UserPricingEntry {
+                display_name: "DeepSeek V4 Pro".to_string(),
+                input: rust_decimal::Decimal::from_str("9").unwrap(),
+                output: rust_decimal::Decimal::from_str("18").unwrap(),
+                cache_read: rust_decimal::Decimal::from_str("1").unwrap(),
+                cache_creation: rust_decimal::Decimal::ZERO,
+            },
+        );
+        let overlay = UserPricingConfig {
+            rate: rust_decimal::Decimal::from_str("7.14").unwrap(),
+            models,
+        };
+        assert!(
+            overlay.lookup("deepseek/deepseek-v4-pro-cache").is_some(),
+            "deepseek-v4-pro-cache 剥离 -cache + 去前缀后应命中覆盖层 deepseek-v4-pro"
+        );
+    }
+
+    #[test]
+    fn test_normalize_claude_word_order_does_not_touch_canonical_form() {
+        // 规范序 claude-opus-4-8 不应被词序规则误改（family 不在末尾）。
+        assert!(normalize_claude_family_word_order("claude-opus-4-8").is_none());
+        assert_eq!(
+            normalize_claude_family_word_order("claude-4.8-opus").as_deref(),
+            Some("claude-opus-4.8")
+        );
+        assert_eq!(
+            normalize_claude_family_word_order("claude-3-7-sonnet").as_deref(),
+            Some("claude-sonnet-3-7")
+        );
     }
 }

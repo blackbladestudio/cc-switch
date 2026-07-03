@@ -61,6 +61,8 @@ pub struct ProxyService {
     /// AppHandle，用于传递给 ProxyServer 以支持故障转移时的 UI 更新
     app_handle: Arc<RwLock<Option<tauri::AppHandle>>>,
     switch_locks: SwitchLockManager,
+    /// 内置定价覆盖层（CNY，编译期嵌入资源），透传给 ProxyState
+    user_pricing: Arc<std::sync::RwLock<crate::services::user_pricing::UserPricingConfig>>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -70,11 +72,22 @@ pub struct HotSwitchOutcome {
 
 impl ProxyService {
     pub fn new(db: Arc<Database>) -> Self {
+        Self::new_with_overlay(db, Arc::new(std::sync::RwLock::new(
+            crate::services::user_pricing::UserPricingConfig::default(),
+        )))
+    }
+
+    /// 带用户定价覆盖层构造（生产路径从 AppState 注入共享 Arc）
+    pub fn new_with_overlay(
+        db: Arc<Database>,
+        user_pricing: Arc<std::sync::RwLock<crate::services::user_pricing::UserPricingConfig>>,
+    ) -> Self {
         Self {
             db,
             server: Arc::new(RwLock::new(None)),
             app_handle: Arc::new(RwLock::new(None)),
             switch_locks: SwitchLockManager::new(),
+            user_pricing,
         }
     }
 
@@ -551,7 +564,7 @@ impl ProxyService {
 
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
-        let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle);
+        let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle, self.user_pricing.clone());
         let info = server
             .start()
             .await
@@ -3100,7 +3113,7 @@ impl ProxyService {
             }
 
             let app_handle = self.app_handle.read().await.clone();
-            let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle);
+            let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle, self.user_pricing.clone());
             let info = new_server
                 .start()
                 .await

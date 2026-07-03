@@ -1213,20 +1213,27 @@ pub fn run() {
 
                 // Session log usage sync: 启动时同步一次，之后每 60 秒检查
                 let db_for_session_sync = state.db.clone();
+                let user_pricing_for_sync = state.user_pricing.clone();
                 tauri::async_runtime::spawn(async move {
                     const SESSION_SYNC_INTERVAL_SECS: u64 = 60;
 
-                    async fn run_session_sync(db: std::sync::Arc<crate::database::Database>, backfill: bool) {
+                    async fn run_session_sync(
+                        db: std::sync::Arc<crate::database::Database>,
+                        backfill: bool,
+                        overlay: Option<crate::services::user_pricing::UserPricingConfig>,
+                    ) {
                         let _guard = crate::services::session_usage::session_sync_mutex()
                             .lock()
                             .await;
                         let task = tauri::async_runtime::spawn_blocking(move || {
                             if backfill {
-                                if let Err(error) = db.backfill_missing_usage_costs() {
+                                if let Err(error) =
+                                    db.backfill_missing_usage_costs_with_overlay(overlay.as_ref())
+                                {
                                     log::warn!("Usage cost startup backfill failed: {error}");
                                 }
                             }
-                            crate::services::session_usage::sync_all_unlocked(&db)
+                            crate::services::session_usage::sync_all_unlocked(&db, overlay.as_ref())
                         });
                         match task.await {
                             Ok(result) if !result.errors.is_empty() => {
@@ -1241,7 +1248,11 @@ pub fn run() {
                     }
 
                     // 首次同步（含费用回填）
-                    run_session_sync(db_for_session_sync.clone(), true).await;
+                    let overlay = user_pricing_for_sync
+                        .read()
+                        .ok()
+                        .map(|g| g.clone());
+                    run_session_sync(db_for_session_sync.clone(), true, overlay).await;
 
                     // 定期同步
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(
@@ -1251,7 +1262,11 @@ pub fn run() {
                     interval.tick().await; // skip immediate first tick
                     loop {
                         interval.tick().await;
-                        run_session_sync(db_for_session_sync.clone(), false).await;
+                        let overlay = user_pricing_for_sync
+                            .read()
+                            .ok()
+                            .map(|g| g.clone());
+                        run_session_sync(db_for_session_sync.clone(), false, overlay).await;
                     }
                 });
             });
@@ -1530,6 +1545,7 @@ pub fn run() {
             commands::get_model_pricing,
             commands::update_model_pricing,
             commands::delete_model_pricing,
+            commands::get_pricing_rate,
             commands::check_provider_limits,
             // Session usage sync
             commands::sync_session_usage,

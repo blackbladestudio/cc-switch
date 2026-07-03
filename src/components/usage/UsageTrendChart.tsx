@@ -12,11 +12,12 @@ import {
 import { useUsageTrends } from "@/lib/query/usage";
 import { Loader2 } from "lucide-react";
 import {
+  fmtCost,
   fmtInt,
-  fmtUsd,
   getLocaleFromLanguage,
   parseFiniteNumber,
 } from "./format";
+import { usePricingRate } from "./PricingRateContext";
 import { resolveUsageRange } from "@/lib/usageRange";
 import type { UsageRangeSelection } from "@/types/usage";
 
@@ -38,6 +39,7 @@ export function UsageTrendChart({
   refreshIntervalMs,
 }: UsageTrendChartProps) {
   const { t, i18n } = useTranslation();
+  const pricingRate = usePricingRate();
   const { startDate, endDate } = resolveUsageRange(range);
   const { data: trends, isLoading } = useUsageTrends(
     range,
@@ -105,7 +107,7 @@ export function UsageTrendChart({
               <span className="font-medium">{entry.name}:</span>
               <span>
                 {entry.dataKey === "cost"
-                  ? fmtUsd(entry.value, 6)
+                  ? fmtCost(entry.value, pricingRate, 6)
                   : fmtInt(entry.value, dateLocale)}
               </span>
             </div>
