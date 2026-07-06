@@ -271,10 +271,7 @@ async fn refresh_studio_auth_on_startup(app: &tauri::AppHandle) {
                     continue;
                 }
             };
-            let api_key_field = meta
-                .api_key_field
-                .as_deref()
-                .map(|s| s.to_string());
+            let api_key_field = meta.api_key_field.as_deref().map(|s| s.to_string());
 
             let result = if let Some(r) = cache.get(&account_id) {
                 r.clone()

@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromStr;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::proxy::usage::calculator::ModelPricing;
@@ -116,9 +116,7 @@ impl UserPricingConfig {
             Ok(raw) => {
                 let rate = number_to_decimal(&raw.rate);
                 if rate.is_zero() {
-                    log::warn!(
-                        "[BUILTIN-PRICING] 内置定价 rate 为 0，已忽略（避免除零）"
-                    );
+                    log::warn!("[BUILTIN-PRICING] 内置定价 rate 为 0，已忽略（避免除零）");
                     return Self::default();
                 }
                 let models = raw
@@ -235,7 +233,10 @@ mod tests {
         let c = cfg("7.14", &[("glm-5.2", "1.4", "4.4")]);
         let p = c.lookup("glm-5.2").expect("应命中 glm-5.2");
         // 1.4 CNY ÷ 7.14 ≈ 0.1961
-        assert_eq!(p.input_cost_per_million, Decimal::from_str("1.4").unwrap() / Decimal::from_str("7.14").unwrap());
+        assert_eq!(
+            p.input_cost_per_million,
+            Decimal::from_str("1.4").unwrap() / Decimal::from_str("7.14").unwrap()
+        );
     }
 
     #[test]

@@ -138,7 +138,10 @@ impl StudioAuthManager {
 
     /// 用 token 调 `/api/auth/me` 拿当前用户 accountId + 显示名。
     /// 401 → NeedsRelogin。
-    pub async fn fetch_account(&self, token: &str) -> Result<(String, Option<String>), StudioAuthError> {
+    pub async fn fetch_account(
+        &self,
+        token: &str,
+    ) -> Result<(String, Option<String>), StudioAuthError> {
         let resp = self
             .http
             .get(format!("{ADMIN_URL}/api/auth/me"))
@@ -465,10 +468,9 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
+            if let Ok(byte) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
                 out.push(byte);
                 i += 3;
                 continue;
@@ -496,21 +498,15 @@ pub async fn spawn_login_server(
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .map_err(StudioAuthError::Io)?;
-    let port = listener
-        .local_addr()
-        .map_err(StudioAuthError::Io)?
-        .port();
+    let port = listener.local_addr().map_err(StudioAuthError::Io)?.port();
     let local_callback = format!("http://127.0.0.1:{port}/callback");
     let login_url = StudioAuthManager::build_login_url(&local_callback, &state);
 
     let state_for_task = state.clone();
     tokio::spawn(async move {
         // 只接受一次连接（admin 跳回）。设 3 分钟超时自动退出。
-        let accept = tokio::time::timeout(
-            std::time::Duration::from_secs(3 * 60),
-            listener.accept(),
-        )
-        .await;
+        let accept =
+            tokio::time::timeout(std::time::Duration::from_secs(3 * 60), listener.accept()).await;
 
         let (mut socket, _) = match accept {
             Ok(Ok(s)) => s,
@@ -636,16 +632,11 @@ pub async fn spawn_login_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::{
-        AuthBinding, AuthBindingSource, Provider, ProviderMeta,
-    };
+    use crate::provider::{AuthBinding, AuthBindingSource, Provider, ProviderMeta};
 
     #[test]
     fn build_login_url_includes_redirect_and_state() {
-        let url = StudioAuthManager::build_login_url(
-            "http://127.0.0.1:54321/callback",
-            "abc-123",
-        );
+        let url = StudioAuthManager::build_login_url("http://127.0.0.1:54321/callback", "abc-123");
         assert!(url.starts_with(ADMIN_URL));
         assert!(url.contains("state=abc-123"));
         // redirect_uri 须被编码（http://127.0.0.1:54321/callback → http%3A%2F%2F...）
@@ -713,7 +704,14 @@ mod tests {
         assert!(is_studio_provider(provider.meta.as_ref().unwrap()));
         mark_needs_relogin(&mut provider, false);
         assert_eq!(
-            provider.meta.as_ref().unwrap().auth_binding.as_ref().unwrap().needs_relogin,
+            provider
+                .meta
+                .as_ref()
+                .unwrap()
+                .auth_binding
+                .as_ref()
+                .unwrap()
+                .needs_relogin,
             Some(false)
         );
     }
@@ -737,6 +735,8 @@ mod tests {
         write_api_key_into_provider(&mut provider, None, "k");
         let env = provider.settings_config["env"].as_object().unwrap();
         assert_eq!(env["ANTHROPIC_AUTH_TOKEN"].as_str(), Some("k"));
-        assert!(!is_studio_provider(provider.meta.as_ref().unwrap_or(&ProviderMeta::default())));
+        assert!(!is_studio_provider(
+            provider.meta.as_ref().unwrap_or(&ProviderMeta::default())
+        ));
     }
 }

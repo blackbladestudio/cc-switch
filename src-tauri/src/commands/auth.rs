@@ -400,7 +400,9 @@ pub async fn auth_logout(
 // ==================== 工作室账号登录（studio_account） ====================
 
 /// 工作室账号认证状态
-pub struct StudioAuthState(pub std::sync::Arc<tokio::sync::RwLock<crate::proxy::providers::studio_auth::StudioAuthManager>>);
+pub struct StudioAuthState(
+    pub std::sync::Arc<tokio::sync::RwLock<crate::proxy::providers::studio_auth::StudioAuthManager>>,
+);
 
 /// 工作室账号登录状态（供前端展示）
 #[derive(Debug, Clone, serde::Serialize)]
@@ -465,15 +467,16 @@ pub async fn auth_studio_refresh(
     studio_state: State<'_, StudioAuthState>,
 ) -> Result<String, String> {
     let mgr = studio_state.0.read().await;
-    mgr.refresh_api_key(&account_id)
-        .await
-        .map_err(|e| {
-            if matches!(e, crate::proxy::providers::studio_auth::StudioAuthError::NeedsRelogin) {
-                "needs_relogin".to_string()
-            } else {
-                e.to_string()
-            }
-        })
+    mgr.refresh_api_key(&account_id).await.map_err(|e| {
+        if matches!(
+            e,
+            crate::proxy::providers::studio_auth::StudioAuthError::NeedsRelogin
+        ) {
+            "needs_relogin".to_string()
+        } else {
+            e.to_string()
+        }
+    })
 }
 
 /// 查询某账号的登录状态（本地是否有 token 缓存）。

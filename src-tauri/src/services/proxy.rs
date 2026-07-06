@@ -72,9 +72,12 @@ pub struct HotSwitchOutcome {
 
 impl ProxyService {
     pub fn new(db: Arc<Database>) -> Self {
-        Self::new_with_overlay(db, Arc::new(std::sync::RwLock::new(
-            crate::services::user_pricing::UserPricingConfig::default(),
-        )))
+        Self::new_with_overlay(
+            db,
+            Arc::new(std::sync::RwLock::new(
+                crate::services::user_pricing::UserPricingConfig::default(),
+            )),
+        )
     }
 
     /// 带用户定价覆盖层构造（生产路径从 AppState 注入共享 Arc）
@@ -564,7 +567,12 @@ impl ProxyService {
 
         // 4. 创建并启动服务器
         let app_handle = self.app_handle.read().await.clone();
-        let server = ProxyServer::new(config.clone(), self.db.clone(), app_handle, self.user_pricing.clone());
+        let server = ProxyServer::new(
+            config.clone(),
+            self.db.clone(),
+            app_handle,
+            self.user_pricing.clone(),
+        );
         let info = server
             .start()
             .await
@@ -3113,7 +3121,12 @@ impl ProxyService {
             }
 
             let app_handle = self.app_handle.read().await.clone();
-            let new_server = ProxyServer::new(new_config.clone(), self.db.clone(), app_handle, self.user_pricing.clone());
+            let new_server = ProxyServer::new(
+                new_config.clone(),
+                self.db.clone(),
+                app_handle,
+                self.user_pricing.clone(),
+            );
             let info = new_server
                 .start()
                 .await
