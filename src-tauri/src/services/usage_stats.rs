@@ -1828,7 +1828,8 @@ impl Database {
             && rust_decimal::Decimal::from_str(&log.cache_creation_cost_usd)
                 .unwrap_or(rust_decimal::Decimal::ZERO)
                 <= rust_decimal::Decimal::ZERO;
-        let needs_cache_recompute = has_cost && (cache_read_underbilled || cache_creation_underbilled);
+        let needs_cache_recompute =
+            has_cost && (cache_read_underbilled || cache_creation_underbilled);
 
         // 重算条件：无成本但有计费 token（原逻辑），或缓存维度漏算（B 路径）。
         // 已正确计费的行（has_cost 且无漏算）跳过，避免无谓重写。
@@ -2876,7 +2877,8 @@ mod tests {
     }
 
     #[test]
-    fn test_backfill_recomputes_rows_with_cache_tokens_but_zero_cache_cost() -> Result<(), AppError> {
+    fn test_backfill_recomputes_rows_with_cache_tokens_but_zero_cache_cost() -> Result<(), AppError>
+    {
         // 回归：内置定价覆盖层 camelCase 反序列化 bug 的受害者行——
         // input/output 已按覆盖层价正确计费（total>0），但 cacheRead 被丢弃
         // 导致 cache_read_cost=0。启动回填的 (A) 分支（total<=0）捞不到这类行，
@@ -2900,15 +2902,15 @@ mod tests {
                     "claude",
                     "glm-5.2",
                     "glm-5.2",
-                    1000,            // input_tokens
-                    500,             // output_tokens
-                    1_000_000,       // cache_read_tokens
-                    0,               // cache_creation_tokens
-                    "0.000140",      // input_cost_usd (已计费)
-                    "0.000220",      // output_cost_usd (已计费)
-                    "0.000000",      // cache_read_cost_usd ← bug：本应非 0
-                    "0.000000",      // cache_creation_cost_usd
-                    "0.000360",      // total_cost_usd > 0
+                    1000,       // input_tokens
+                    500,        // output_tokens
+                    1_000_000,  // cache_read_tokens
+                    0,          // cache_creation_tokens
+                    "0.000140", // input_cost_usd (已计费)
+                    "0.000220", // output_cost_usd (已计费)
+                    "0.000000", // cache_read_cost_usd ← bug：本应非 0
+                    "0.000000", // cache_creation_cost_usd
+                    "0.000360", // total_cost_usd > 0
                 ],
             )?;
         }

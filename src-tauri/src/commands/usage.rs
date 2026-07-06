@@ -124,9 +124,10 @@ pub fn get_request_detail(
 /// 前端用于把后端返回的 USD 成本数值 × rate 换算成 CNY 显示。
 #[tauri::command]
 pub fn get_pricing_rate(state: State<'_, AppState>) -> Result<String, AppError> {
-    let overlay = state.user_pricing.read().map_err(|e| {
-        AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
-    })?;
+    let overlay = state
+        .user_pricing
+        .read()
+        .map_err(|e| AppError::Database(format!("读取内置定价覆盖层失败: {e}")))?;
     Ok(overlay.rate.to_string())
 }
 
@@ -183,9 +184,10 @@ pub fn get_model_pricing(state: State<'_, AppState>) -> Result<Vec<ModelPricingI
     // 用 model_pricing_candidates 生成候选名逐个比对，而非裸 model_id 精确匹配——
     // 否则 DB 里 gpt-5.5-2025-08-07 这类带后缀的行不会被覆盖层 gpt-5.5 覆盖，
     // 但计费时却能命中，导致 UI 显示价与实际计费价不一致。
-    let overlay = state.user_pricing.read().map_err(|e| {
-        AppError::Database(format!("读取用户定价覆盖层失败: {e}"))
-    })?;
+    let overlay = state
+        .user_pricing
+        .read()
+        .map_err(|e| AppError::Database(format!("读取用户定价覆盖层失败: {e}")))?;
     if !overlay.is_empty() {
         let rate = if overlay.rate.is_zero() {
             Decimal::ONE
@@ -270,9 +272,10 @@ pub fn update_model_pricing(
     // 内置定价覆盖层行只读（随应用发布），禁止在 UI 内修改。
     // 用候选名匹配，与计费/合并口径一致：带后缀的变体若被覆盖层接管同样禁改。
     {
-        let overlay = state.user_pricing.read().map_err(|e| {
-            AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
-        })?;
+        let overlay = state
+            .user_pricing
+            .read()
+            .map_err(|e| AppError::Database(format!("读取内置定价覆盖层失败: {e}")))?;
         if overlay.contains_model(&model_id) {
             return Err(AppError::localized(
                 "usage.userPricingReadOnly",
@@ -325,14 +328,9 @@ pub fn update_model_pricing(
 
     // 历史用量回填需用同一覆盖层重算（内置定价缺失模型的历史 0 成本行
     // 也能补回来）。先取出覆盖层快照，避免持有锁跨 DB 写入。
-    let overlay_snapshot = state
-        .user_pricing
-        .read()
-        .map(|guard| guard.clone())
-        .ok();
+    let overlay_snapshot = state.user_pricing.read().map(|guard| guard.clone()).ok();
 
-    if let Err(e) =
-        db.backfill_missing_usage_costs_for_model(&model_id, overlay_snapshot.as_ref())
+    if let Err(e) = db.backfill_missing_usage_costs_for_model(&model_id, overlay_snapshot.as_ref())
     {
         log::warn!("模型定价更新后回填历史用量成本失败 (model_id={model_id}): {e}");
     }
@@ -355,14 +353,17 @@ pub fn check_provider_limits(
 pub fn delete_model_pricing(state: State<'_, AppState>, model_id: String) -> Result<(), AppError> {
     // 内置定价覆盖层行只读（随应用发布），禁止在 UI 内删除
     {
-        let overlay = state.user_pricing.read().map_err(|e| {
-            AppError::Database(format!("读取内置定价覆盖层失败: {e}"))
-        })?;
+        let overlay = state
+            .user_pricing
+            .read()
+            .map_err(|e| AppError::Database(format!("读取内置定价覆盖层失败: {e}")))?;
         if overlay.contains_model(&model_id) {
             return Err(AppError::localized(
                 "usage.userPricingReadOnly",
                 format!("该模型定价为应用内置，不可删除: {model_id}"),
-                format!("This model's pricing is built into the app and cannot be deleted: {model_id}"),
+                format!(
+                    "This model's pricing is built into the app and cannot be deleted: {model_id}"
+                ),
             ));
         }
     }
