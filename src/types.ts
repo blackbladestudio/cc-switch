@@ -125,6 +125,26 @@ export interface AuthBinding {
   source: AuthBindingSource;
   authProvider?: string;
   accountId?: string;
+  /** 登录凭证失效需重新登录（仅 managed_account 适用） */
+  needsRelogin?: boolean;
+}
+
+/** 工作室账号登录回调事件 payload（本地 HTTP server 收到 admin 回调后 emit） */
+export interface StudioAuthCallbackPayload {
+  apiKey?: string;
+  accountId?: string;
+  accountName?: string;
+  keyId?: string;
+  token?: string;
+  state: string;
+  error?: string;
+}
+
+/** 单个已登录工作室账号的状态（认证中心列表用） */
+export interface StudioAccountStatus {
+  accountId: string;
+  accountName: string | null;
+  needsRelogin: boolean;
 }
 
 export interface ClaudeDesktopModelRoute {

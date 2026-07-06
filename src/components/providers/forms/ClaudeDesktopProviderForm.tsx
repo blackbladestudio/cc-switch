@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import {
   ChevronDown,
   ChevronRight,
@@ -39,6 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { BasicFormFields } from "./BasicFormFields";
 import { CodexOAuthSection } from "./CodexOAuthSection";
 import { CopilotAuthSection } from "./CopilotAuthSection";
+import { StudioAuthStatusBadge } from "./StudioAuthStatusBadge";
 import { EndpointField } from "./shared/EndpointField";
 import { ModelDropdown } from "./shared/ModelDropdown";
 import { ModelApiOverridesEditor } from "./ModelApiOverridesEditor";
@@ -67,7 +69,12 @@ import {
   providersApi,
   type ClaudeDesktopDefaultRoute,
 } from "@/lib/api/providers";
-import { resolveManagedAccountId } from "@/lib/authBinding";
+import {
+  resolveManagedAccountId,
+  isStudioAccountProvider,
+  getStudioAccountId,
+  studioNeedsRelogin as studioNeedsReloginFn,
+} from "@/lib/authBinding";
 
 export type ClaudeDesktopProviderFormValues = ProviderFormData & {
   presetId?: string;
@@ -103,6 +110,8 @@ export interface ClaudeDesktopProviderFormProps {
   };
   showButtons?: boolean;
   readOnlyTeamFields?: boolean;
+  /** 跳转到认证中心（工作室账号未登录/失效时引导用户去登录） */
+  onGoToAuthCenter?: () => void;
 }
 
 type RouteRow = {
@@ -256,6 +265,7 @@ export function ClaudeDesktopProviderForm({
   initialData,
   showButtons = true,
   readOnlyTeamFields = false,
+  onGoToAuthCenter,
 }: ClaudeDesktopProviderFormProps) {
   const { t } = useTranslation();
   const initialMode = initialData?.meta?.claudeDesktopMode ?? "direct";
@@ -288,6 +298,90 @@ export function ClaudeDesktopProviderForm({
       ? "ANTHROPIC_API_KEY"
       : "ANTHROPIC_AUTH_TOKEN",
   );
+  // 工作室账号自动获取 apiKey 模式
+  const [studioAuthMode, setStudioAuthMode] = useState<boolean>(() =>
+    isStudioAccountProvider(initialData?.meta),
+  );
+  const [studioAccountId, setStudioAccountId] = useState<string | null>(() =>
+    getStudioAccountId(initialData?.meta),
+  );
+  const [studioAccountName, setStudioAccountName] = useState<string | null>(
+    null,
+  );
+  const [studioNeedsRelogin, setStudioNeedsRelogin] = useState<boolean>(() =>
+    studioNeedsReloginFn(initialData?.meta),
+  );
+
+  // 已登录的工作室账号：若本地无显示名，从后端缓存补一次（仅用于 UI 展示）
+  useEffect(() => {
+    if (!studioAccountId || studioAccountName) return;
+    let cancelled = false;
+    invoke<{ authenticated: boolean; accountName: string | null }>(
+      "auth_studio_get_status",
+      { accountId: studioAccountId },
+    )
+      .then((status) => {
+        if (cancelled) return;
+        if (status.authenticated && status.accountName) {
+          setStudioAccountName(status.accountName);
+        }
+      })
+      .catch(() => {
+        /* 静默：仅补显示名，失败不影响功能 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAccountId, studioAccountName]);
+
+  // 团队 provider 默认 authBinding.accountId 为空：挂载时若处于自动获取模式且无 accountId，
+  // 自动回填当前登录的第一个工作室账号，避免保存后启动刷新因 accountId 空而跳过。
+  useEffect(() => {
+    if (!studioAuthMode || studioAccountId) return;
+    let cancelled = false;
+    invoke<{
+      authenticated: boolean;
+      accountId: string | null;
+      accountName: string | null;
+    }>("auth_studio_get_status", {})
+      .then((status) => {
+        if (cancelled) return;
+        if (status.authenticated && status.accountId) {
+          setStudioAccountId(status.accountId);
+          if (status.accountName) setStudioAccountName(status.accountName);
+        }
+      })
+      .catch(() => {
+        /* 静默 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAuthMode, studioAccountId]);
+
+  // 切到「自动获取」模式时立即刷新一次 key：成功写入 apiKey state（供 save 写入 env），
+  // 失败/未登录则留空，badge 显示红点提示用户去认证中心登录。
+  useEffect(() => {
+    if (!studioAuthMode || !studioAccountId) return;
+    let cancelled = false;
+    invoke<string>("auth_studio_refresh", { accountId: studioAccountId })
+      .then((newKey) => {
+        if (cancelled) return;
+        setApiKey(newKey);
+        setStudioNeedsRelogin(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = String(e);
+        if (msg.includes("needs_relogin")) {
+          setStudioNeedsRelogin(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAuthMode, studioAccountId]);
+
   const [selectedGitHubAccountId, setSelectedGitHubAccountId] = useState<
     string | null
   >(() => resolveManagedAccountId(initialData?.meta, "github_copilot"));
@@ -579,7 +673,7 @@ export function ClaudeDesktopProviderForm({
       );
       return;
     }
-    if (!usesManagedOAuth && !apiKey.trim()) {
+    if (!usesManagedOAuth && !studioAuthMode && !apiKey.trim()) {
       toast.error(
         t("providerForm.fetchModelsNeedApiKey", {
           defaultValue: "请先填写 API Key",
@@ -710,12 +804,28 @@ export function ClaudeDesktopProviderForm({
               authProvider: "codex_oauth",
               accountId: selectedCodexAccountId ?? undefined,
             }
-          : undefined;
+          : studioAuthMode
+            ? {
+                source: "managed_account",
+                authProvider: "studio_account",
+                accountId: studioAccountId ?? undefined,
+                needsRelogin: studioNeedsRelogin || undefined,
+              }
+            : undefined;
     meta.codexFastMode =
       activeProviderType === "codex_oauth" ? codexFastMode : undefined;
 
     delete meta.endpointAutoSelect;
     delete meta.isFullUrl;
+
+    // 工作室自动获取模式但未登录：允许保存，但提示用户去认证中心登录。
+    if (studioAuthMode && !studioAccountId) {
+      toast.info(
+        t("studioAuth.saveWithoutLogin", {
+          defaultValue: "未登录工作室账号，请前往认证中心登录后刷新 key",
+        }),
+      );
+    }
 
     await onSubmit({
       ...values,
@@ -811,14 +921,55 @@ export function ClaudeDesktopProviderForm({
                 )}
               </div>
             ) : (
-              <div className="space-y-1">
-                <Label>{"API Key"}</Label>
-                <Input
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  type="password"
-                  placeholder="sk-..."
-                />
+              <div className="space-y-3">
+                {/* 手动 / 自动模式切换 */}
+                <div className="space-y-2">
+                  <Label>
+                    {t("studioAuth.modeLabel", {
+                      defaultValue: "API Key 获取方式",
+                    })}
+                  </Label>
+                  <Select
+                    value={studioAuthMode ? "studio" : "manual"}
+                    onValueChange={(v) => setStudioAuthMode(v === "studio")}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="manual">
+                        {t("studioAuth.modeManual", {
+                          defaultValue: "手动输入",
+                        })}
+                      </SelectItem>
+                      <SelectItem value="studio">
+                        {t("studioAuth.modeAuto", { defaultValue: "自动获取" })}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {studioAuthMode ? (
+                  <StudioAuthStatusBadge
+                    accountId={studioAccountId}
+                    accountName={studioAccountName}
+                    needsRelogin={studioNeedsRelogin}
+                    onGoToAuthCenter={onGoToAuthCenter}
+                    onRefreshedKey={(newKey) => {
+                      setApiKey(newKey);
+                      setStudioNeedsRelogin(false);
+                    }}
+                  />
+                ) : (
+                  <div className="space-y-1">
+                    <Label>{"API Key"}</Label>
+                    <Input
+                      value={apiKey}
+                      onChange={(event) => setApiKey(event.target.value)}
+                      type="password"
+                      placeholder="sk-..."
+                    />
+                  </div>
+                )}
               </div>
             )}
 

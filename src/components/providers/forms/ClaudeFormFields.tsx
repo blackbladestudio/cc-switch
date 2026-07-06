@@ -36,6 +36,7 @@ import EndpointSpeedTest from "./EndpointSpeedTest";
 import { ApiKeySection, EndpointField, ModelInputWithFetch } from "./shared";
 import { CopilotAuthSection } from "./CopilotAuthSection";
 import { CodexOAuthSection } from "./CodexOAuthSection";
+import { StudioAuthStatusBadge } from "./StudioAuthStatusBadge";
 import {
   copilotGetModels,
   copilotGetModelsForAccount,
@@ -156,6 +157,22 @@ interface ClaudeFormFieldsProps {
 
   // Team-managed read-only fields (API key stays editable)
   readOnlyTeamFields?: boolean;
+
+  // 工作室账号自动获取 apiKey
+  /** 当前是否为工作室账号自动获取模式 */
+  isStudioAuthMode?: boolean;
+  /** 工作室账号 accountId（null=未登录） */
+  studioAccountId?: string | null;
+  /** 工作室账号显示名（null=未知，UI 回退到 accountId） */
+  studioAccountName?: string | null;
+  /** 登录凭证是否失效需重新登录 */
+  studioNeedsRelogin?: boolean;
+  /** 切换手动/自动模式 */
+  onStudioAuthModeChange?: (enabled: boolean) => void;
+  /** 刷新成功后回写最新 key 给父表单 save 用 */
+  onStudioRefreshedKey?: (key: string) => void;
+  /** 跳转到认证中心（未登录/失效时提示用户去登录） */
+  onGoToAuthCenter?: () => void;
 }
 
 export function ClaudeFormFields({
@@ -215,6 +232,13 @@ export function ClaudeFormFields({
   customUserAgent,
   onCustomUserAgentChange,
   readOnlyTeamFields = false,
+  isStudioAuthMode = false,
+  studioAccountId = null,
+  studioAccountName = null,
+  studioNeedsRelogin = false,
+  onStudioAuthModeChange,
+  onStudioRefreshedKey,
+  onGoToAuthCenter,
 }: ClaudeFormFieldsProps) {
   const { t } = useTranslation();
   const hasAnyAdvancedValue = !!(
@@ -609,17 +633,66 @@ export function ClaudeFormFields({
         />
       )}
 
-      {/* API Key 输入框（非 OAuth 预设时显示） */}
+      {/* API Key 输入框 / 工作室账号自动获取（非 OAuth 预设时显示） */}
       {shouldShowApiKey && !usesOAuth && (
-        <ApiKeySection
-          value={apiKey}
-          onChange={onApiKeyChange}
-          category={category}
-          shouldShowLink={shouldShowApiKeyLink}
-          websiteUrl={websiteUrl}
-          isPartner={isPartner}
-          partnerPromotionKey={partnerPromotionKey}
-        />
+        <div className="space-y-3">
+          {/* 手动 / 自动 模式切换 */}
+          {onStudioAuthModeChange && (
+            <div className="space-y-2">
+              <FormLabel>
+                {t("studioAuth.modeLabel", {
+                  defaultValue: "API Key 获取方式",
+                })}
+              </FormLabel>
+              <Select
+                value={isStudioAuthMode ? "studio" : "manual"}
+                onValueChange={(v) => onStudioAuthModeChange(v === "studio")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">
+                    {t("studioAuth.modeManual", { defaultValue: "手动输入" })}
+                  </SelectItem>
+                  <SelectItem value="studio">
+                    {t("studioAuth.modeAuto", { defaultValue: "自动获取" })}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {isStudioAuthMode ? (
+            <StudioAuthStatusBadge
+              accountId={studioAccountId}
+              accountName={studioAccountName}
+              needsRelogin={studioNeedsRelogin}
+              onGoToAuthCenter={
+                onGoToAuthCenter ??
+                (() => {
+                  /* no-op */
+                })
+              }
+              onRefreshedKey={
+                onStudioRefreshedKey ??
+                (() => {
+                  /* no-op */
+                })
+              }
+            />
+          ) : (
+            <ApiKeySection
+              value={apiKey}
+              onChange={onApiKeyChange}
+              category={category}
+              shouldShowLink={shouldShowApiKeyLink}
+              websiteUrl={websiteUrl}
+              isPartner={isPartner}
+              partnerPromotionKey={partnerPromotionKey}
+            />
+          )}
+        </div>
       )}
 
       {/* 模板变量输入 */}

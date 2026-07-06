@@ -117,6 +117,25 @@ pub fn restore_secrets(target: &mut Provider, secrets: &Value, app: &AppType) {
     }
 }
 
+/// 若 existing 已绑定真实 authBinding（accountId 非空，说明用户已登录工作室账号等
+/// 托管认证），则用 existing 的 authBinding 覆盖 incoming 的默认占位值，避免 re-sync
+/// 丢失登录态。incoming 的其它 meta 字段（如 registry 新增的 routes）保持不变。
+fn preserve_existing_auth_binding(incoming: &mut Provider, existing: &Provider) {
+    let Some(existing_binding) = existing.meta.as_ref().and_then(|m| m.auth_binding.as_ref())
+    else {
+        return;
+    };
+    let account_id_nonempty = existing_binding
+        .account_id
+        .as_deref()
+        .is_some_and(|id| !id.is_empty());
+    if !account_id_nonempty {
+        return;
+    }
+    let meta = incoming.meta.get_or_insert_with(Default::default);
+    meta.auth_binding = Some(existing_binding.clone());
+}
+
 pub fn merge_team_provider(
     existing: Option<&Provider>,
     mut incoming: Provider,
@@ -136,6 +155,10 @@ pub fn merge_team_provider(
         if existing.created_at.is_some() {
             incoming.created_at = existing.created_at;
         }
+        // 保留用户已登录的 authBinding：registry 下发的 incoming.meta.authBinding 是
+        // 默认占位（accountId=None），若用 existing 已绑定真实 accountId/needsRelogin
+        // 则覆盖回去，避免 team re-sync 把工作室账号登录态清掉。
+        preserve_existing_auth_binding(&mut incoming, existing);
     }
 
     restore_secrets(&mut incoming, &secrets, app);

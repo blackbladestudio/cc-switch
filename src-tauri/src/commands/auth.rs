@@ -303,3 +303,149 @@ pub async fn auth_logout(
         _ => unreachable!(),
     }
 }
+
+// ==================== 工作室账号登录（studio_account） ====================
+
+/// 工作室账号认证状态
+pub struct StudioAuthState(pub std::sync::Arc<tokio::sync::RwLock<crate::proxy::providers::studio_auth::StudioAuthManager>>);
+
+/// 工作室账号登录状态（供前端展示）
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAuthStatus {
+    pub authenticated: bool,
+    pub account_id: Option<String>,
+    /// 用户显示名（来自缓存，仅用于 UI 展示）
+    pub account_name: Option<String>,
+    /// 登录凭证是否已失效，需重新登录
+    pub needs_relogin: bool,
+}
+
+/// 单个工作室账号的状态（认证中心列表用）
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioAccountStatus {
+    pub account_id: String,
+    pub account_name: Option<String>,
+    /// 登录凭证是否已失效（仅在 refresh 尝试时才能检测，本地缓存默认 false）
+    pub needs_relogin: bool,
+}
+
+/// 列出所有已登录的工作室账号（认证中心展示用）。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_list_accounts(
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<Vec<StudioAccountStatus>, String> {
+    let mgr = studio_state.0.read().await;
+    let accounts = mgr.list_accounts().await;
+    Ok(accounts
+        .into_iter()
+        .map(|(account_id, account_name)| StudioAccountStatus {
+            account_id,
+            account_name,
+            needs_relogin: false,
+        })
+        .collect())
+}
+
+/// 开始工作室账号登录：绑本地随机端口起一次性 HTTP server 接收 admin 回调，
+/// 返回登录页 URL（`{ADMIN_URL}/login?redirect=http://127.0.0.1:<port>/callback&state=<state>`）。
+/// 前端拿到 URL 后用 `open_external` 打开浏览器。admin 登录完成跳回本地 server，
+/// Rust 用 code 换 token + reveal key，emit `studio-auth-callback` 事件给前端。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_login_start(
+    state: String,
+    app: tauri::AppHandle,
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<String, String> {
+    let mgr = studio_state.0.clone();
+    crate::proxy::providers::studio_auth::spawn_login_server(app, mgr, state)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 用缓存的 token 静默 reveal 最新 apiKey。
+/// 供启动刷新任务与前端「重新获取」按钮复用。401 时返回错误字符串 `"needs_relogin"`。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_refresh(
+    account_id: String,
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<String, String> {
+    let mgr = studio_state.0.read().await;
+    mgr.refresh_api_key(&account_id)
+        .await
+        .map_err(|e| {
+            if matches!(e, crate::proxy::providers::studio_auth::StudioAuthError::NeedsRelogin) {
+                "needs_relogin".to_string()
+            } else {
+                e.to_string()
+            }
+        })
+}
+
+/// 查询某账号的登录状态（本地是否有 token 缓存）。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_get_status(
+    account_id: Option<String>,
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<StudioAuthStatus, String> {
+    let mgr = studio_state.0.read().await;
+    match account_id {
+        Some(id) if !id.is_empty() => {
+            let authenticated = mgr.has_account(&id).await;
+            let account_name = if authenticated {
+                mgr.get_account_name(&id).await
+            } else {
+                None
+            };
+            Ok(StudioAuthStatus {
+                authenticated,
+                account_id: Some(id),
+                account_name,
+                needs_relogin: !authenticated,
+            })
+        }
+        _ => {
+            let ids = mgr.list_account_ids().await;
+            let first = ids.into_iter().next();
+            let account_name = if let Some(id) = &first {
+                mgr.get_account_name(id).await
+            } else {
+                None
+            };
+            Ok(StudioAuthStatus {
+                authenticated: first.is_some(),
+                account_id: first,
+                account_name,
+                needs_relogin: false,
+            })
+        }
+    }
+}
+
+/// 登录回调成功后，把 token + keyId + accountId + 显示名 落盘（apiKey 由前端直接写进 provider 字段）。
+/// 由前端收到 `studio-auth-callback` 事件后调用。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_save_account(
+    account_id: String,
+    key_id: String,
+    token: String,
+    account_name: Option<String>,
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<(), String> {
+    let mgr = studio_state.0.read().await;
+    mgr.save_account(&account_id, &key_id, &token, account_name.as_deref())
+        .await;
+    Ok(())
+}
+
+/// 移除账号缓存（切回手动模式 / 登出时调）。
+#[tauri::command(rename_all = "camelCase")]
+pub async fn auth_studio_remove_account(
+    account_id: String,
+    studio_state: State<'_, StudioAuthState>,
+) -> Result<(), String> {
+    let mgr = studio_state.0.read().await;
+    mgr.remove_account(&account_id).await;
+    Ok(())
+}

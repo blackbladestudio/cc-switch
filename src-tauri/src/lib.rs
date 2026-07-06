@@ -116,6 +116,103 @@ fn redact_url_for_log(url_str: &str) -> String {
     }
 }
 
+/// 工作室账号 apiKey 启动静默刷新。
+///
+/// 遍历 claude / claude-desktop 下所有 `authBinding.authProvider == studio_account` 的 provider，
+/// 对每个 accountId 调后台换 key 接口；成功则把新 key 写进 `settings_config.env[apiKeyField]`
+/// 并清 `needsRelogin`，失败（refreshToken 失效）则置 `needsRelogin=true`。结果落盘 DB。
+///
+/// 同账号多 provider 只调一次换 key 接口（按 accountId 去重缓存结果）。
+async fn refresh_studio_auth_on_startup(app: &tauri::AppHandle) {
+    use crate::commands::StudioAuthState;
+    use crate::proxy::providers::studio_auth::{
+        is_studio_provider, mark_needs_relogin, write_api_key_into_provider,
+    };
+    use std::collections::HashMap;
+
+    let state = app.state::<AppState>();
+    let db = state.db.clone();
+    let studio_state = match app.try_state::<StudioAuthState>() {
+        Some(s) => s.0.clone(),
+        None => {
+            log::warn!("[StudioAuth] StudioAuthState 未初始化，跳过启动刷新");
+            return;
+        }
+    };
+
+    let app_types = ["claude", "claude-desktop"];
+    // accountId → (refreshed_key_result)，避免同账号重复打后台
+    let mut cache: HashMap<String, Result<String, String>> = HashMap::new();
+
+    for app_type in app_types {
+        let providers = match db.get_all_providers(app_type) {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("[StudioAuth] 读取 {app_type} providers 失败: {e}");
+                continue;
+            }
+        };
+
+        for (id, mut provider) in providers {
+            let meta = match provider.meta.as_ref() {
+                Some(m) if is_studio_provider(m) => m,
+                _ => continue,
+            };
+            let account_id = match meta
+                .auth_binding
+                .as_ref()
+                .and_then(|b| b.account_id.as_deref())
+            {
+                Some(aid) if !aid.is_empty() => aid.to_string(),
+                _ => {
+                    // 尚未登录过（团队 provider 首次同步下来），跳过
+                    continue;
+                }
+            };
+            let api_key_field = meta
+                .api_key_field
+                .as_deref()
+                .map(|s| s.to_string());
+
+            let result = if let Some(r) = cache.get(&account_id) {
+                r.clone()
+            } else {
+                let mgr = studio_state.read().await;
+                let r = mgr.refresh_api_key(&account_id).await.map_err(|e| {
+                    if matches!(
+                        e,
+                        crate::proxy::providers::studio_auth::StudioAuthError::NeedsRelogin
+                    ) {
+                        "needs_relogin".to_string()
+                    } else {
+                        e.to_string()
+                    }
+                });
+                cache.insert(account_id.clone(), r.clone());
+                r
+            };
+
+            match result {
+                Ok(new_key) => {
+                    write_api_key_into_provider(&mut provider, api_key_field.as_deref(), &new_key);
+                    mark_needs_relogin(&mut provider, false);
+                    log::info!("[StudioAuth] 刷新 apiKey 成功: app={app_type} provider={id}");
+                }
+                Err(_) => {
+                    mark_needs_relogin(&mut provider, true);
+                    log::warn!(
+                        "[StudioAuth] 刷新 apiKey 失败（需重新登录）: app={app_type} provider={id}"
+                    );
+                }
+            }
+
+            if let Err(e) = db.save_provider(app_type, &provider) {
+                log::warn!("[StudioAuth] 保存 provider {id} 失败: {e}");
+            }
+        }
+    }
+}
+
 /// 统一处理 ccswitch:// 深链接 URL
 ///
 /// - 解析 URL
@@ -951,6 +1048,18 @@ pub fn run() {
                 log::info!("✓ CodexOAuthManager initialized");
             }
 
+            // 初始化 StudioAuthManager (工作室账号登录自动获取 apiKey)
+            {
+                use crate::proxy::providers::studio_auth::StudioAuthManager;
+                use commands::StudioAuthState;
+                use tokio::sync::RwLock;
+
+                let app_config_dir = crate::config::get_app_config_dir();
+                let studio_auth_manager = StudioAuthManager::new(app_config_dir);
+                app.manage(StudioAuthState(Arc::new(RwLock::new(studio_auth_manager))));
+                log::info!("✓ StudioAuthManager initialized");
+            }
+
             // 初始化全局出站代理 HTTP 客户端
             {
                 let db = &app.state::<AppState>().db;
@@ -1105,6 +1214,16 @@ pub fn run() {
                     }
                 });
             });
+
+            // 工作室账号 apiKey 启动静默刷新：
+            // 遍历所有 studio_account 绑定的 provider，用缓存 refreshToken 换新 key 写回 env；
+            // refreshToken 失效则标 needsRelogin，不阻断启动。
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    refresh_studio_auth_on_startup(&app_handle).await;
+                });
+            }
 
             // Linux: 禁用 WebKitGTK 硬件加速，防止 EGL 初始化失败导致白屏
             #[cfg(target_os = "linux")]
@@ -1439,6 +1558,13 @@ pub fn run() {
             commands::auth_remove_account,
             commands::auth_set_default_account,
             commands::auth_logout,
+            // Studio account login (auto-fetch apiKey)
+            commands::auth_studio_login_start,
+            commands::auth_studio_refresh,
+            commands::auth_studio_get_status,
+            commands::auth_studio_list_accounts,
+            commands::auth_studio_save_account,
+            commands::auth_studio_remove_account,
             // Copilot OAuth commands (multi-account support)
             commands::copilot_start_device_flow,
             commands::copilot_poll_for_auth,

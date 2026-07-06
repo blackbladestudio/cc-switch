@@ -1,9 +1,10 @@
-import { Github, ShieldCheck } from "lucide-react";
+import { Github, ShieldCheck, Sword } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { CodexIcon } from "@/components/BrandIcons";
 import { CopilotAuthSection } from "@/components/providers/forms/CopilotAuthSection";
 import { CodexOAuthSection } from "@/components/providers/forms/CodexOAuthSection";
+import { StudioAuthCenterSection } from "@/components/settings/StudioAuthCenterSection";
 
 export function AuthCenterPanel() {
   const { t } = useTranslation();
@@ -32,6 +33,28 @@ export function AuthCenterPanel() {
             {t("settings.authCenter.beta", { defaultValue: "Beta" })}
           </Badge>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-border/60 bg-card/60 p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-muted">
+            <Sword className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="font-medium">
+              {t("settings.authCenter.studioTitle", {
+                defaultValue: "黑剑工作室OAuth",
+              })}
+            </h4>
+            <p className="text-sm text-muted-foreground">
+              {t("settings.authCenter.studioDescription", {
+                defaultValue: "管理工作室账号登录",
+              })}
+            </p>
+          </div>
+        </div>
+
+        <StudioAuthCenterSection />
       </section>
 
       <section className="rounded-xl border border-border/60 bg-card/60 p-6">
