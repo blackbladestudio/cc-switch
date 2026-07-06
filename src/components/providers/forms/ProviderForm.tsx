@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Form, FormField, FormItem, FormMessage } from "@/components/ui/form";
@@ -123,7 +124,12 @@ import {
   normalizePricingSource,
 } from "./helpers/opencodeFormUtils";
 import { HERMES_DEFAULT_CONFIG } from "./hooks/useHermesFormState";
-import { resolveManagedAccountId } from "@/lib/authBinding";
+import {
+  resolveManagedAccountId,
+  isStudioAccountProvider,
+  getStudioAccountId,
+  studioNeedsRelogin as studioNeedsReloginFn,
+} from "@/lib/authBinding";
 import { useOpenClawLiveProviderIds } from "@/hooks/useOpenClaw";
 import { useHermesLiveProviderIds } from "@/hooks/useHermes";
 
@@ -242,6 +248,8 @@ export interface ProviderFormProps {
   };
   showButtons?: boolean;
   isProxyTakeover?: boolean;
+  /** 跳转到认证中心（工作室账号未登录/失效时引导用户去登录） */
+  onGoToAuthCenter?: () => void;
 }
 
 export function ProviderForm(props: ProviderFormProps) {
@@ -275,6 +283,7 @@ function ProviderFormFull({
   initialData,
   showButtons = true,
   isProxyTakeover = false,
+  onGoToAuthCenter,
 }: ProviderFormProps) {
   if (appId === "claude-desktop") {
     throw new Error("ProviderFormFull should not receive claude-desktop");
@@ -441,6 +450,67 @@ function ProviderFormFull({
     },
   );
 
+  // 工作室账号自动获取 apiKey 模式
+  const [studioAuthMode, setStudioAuthMode] = useState<boolean>(() =>
+    isStudioAccountProvider(initialData?.meta),
+  );
+  const [studioAccountId, setStudioAccountId] = useState<string | null>(() =>
+    getStudioAccountId(initialData?.meta),
+  );
+  const [studioAccountName, setStudioAccountName] = useState<string | null>(
+    null,
+  );
+  const [studioNeedsRelogin, setStudioNeedsRelogin] = useState<boolean>(() =>
+    studioNeedsReloginFn(initialData?.meta),
+  );
+
+  // 已登录的工作室账号：若本地无显示名，从后端缓存补一次（仅用于 UI 展示）
+  useEffect(() => {
+    if (!studioAccountId || studioAccountName) return;
+    let cancelled = false;
+    invoke<{ authenticated: boolean; accountName: string | null }>(
+      "auth_studio_get_status",
+      { accountId: studioAccountId },
+    )
+      .then((status) => {
+        if (cancelled) return;
+        if (status.authenticated && status.accountName) {
+          setStudioAccountName(status.accountName);
+        }
+      })
+      .catch(() => {
+        /* 静默：仅补显示名，失败不影响功能 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAccountId, studioAccountName]);
+
+  // 团队 provider 默认 authBinding.accountId 为空：挂载时若处于自动获取模式且无 accountId，
+  // 自动回填当前登录的第一个工作室账号，避免保存后启动刷新因 accountId 空而跳过。
+  useEffect(() => {
+    if (!studioAuthMode || studioAccountId) return;
+    let cancelled = false;
+    invoke<{
+      authenticated: boolean;
+      accountId: string | null;
+      accountName: string | null;
+    }>("auth_studio_get_status", {})
+      .then((status) => {
+        if (cancelled) return;
+        if (status.authenticated && status.accountId) {
+          setStudioAccountId(status.accountId);
+          if (status.accountName) setStudioAccountName(status.accountName);
+        }
+      })
+      .catch(() => {
+        /* 静默 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAuthMode, studioAccountId]);
+
   // 软校验：收集"业务约束"类问题（空值/缺项），由用户决定是否仍要保存
   const [softIssues, setSoftIssues] = useState<string[] | null>(null);
   const [pendingFormValues, setPendingFormValues] =
@@ -468,6 +538,29 @@ function ProviderFormFull({
     appType: appId,
     apiKeyField: appId === "claude" ? localApiKeyField : undefined,
   });
+
+  // 切到「自动获取」模式时立即刷新一次 key：成功写入 settingsConfig.env[apiKeyField]
+  // （通过 handleApiKeyChange），失败/未登录则留空，badge 显示红点提示去认证中心登录。
+  useEffect(() => {
+    if (!studioAuthMode || !studioAccountId) return;
+    let cancelled = false;
+    invoke<string>("auth_studio_refresh", { accountId: studioAccountId })
+      .then((newKey) => {
+        if (cancelled) return;
+        handleApiKeyChange(newKey);
+        setStudioNeedsRelogin(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = String(e);
+        if (msg.includes("needs_relogin")) {
+          setStudioNeedsRelogin(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studioAuthMode, studioAccountId, handleApiKeyChange]);
 
   const { baseUrl, handleClaudeBaseUrlChange } = useBaseUrlState({
     appType: appId,
@@ -1321,6 +1414,7 @@ function ProviderFormFull({
           !isCopilotProvider &&
           !isCodexOauthProvider &&
           !isXaiOauthProvider &&
+          !studioAuthMode &&
           !apiKey.trim()
         ) {
           issues.push(
@@ -1628,6 +1722,13 @@ function ProviderFormFull({
                 authProvider: "xai_oauth",
                 accountId: selectedXaiAccountId ?? undefined,
               }
+          : studioAuthMode
+            ? {
+                source: "managed_account",
+                authProvider: "studio_account",
+                accountId: studioAccountId ?? undefined,
+                needsRelogin: studioNeedsRelogin || undefined,
+              }
             : undefined,
       // GitHub Copilot 多账号：保存关联的账号 ID
       githubAccountId:
@@ -1721,6 +1822,15 @@ function ProviderFormFull({
     }
 
     payload.meta = nextMeta;
+
+    // 工作室自动获取模式但未登录：允许保存，但提示用户去认证中心登录。
+    if (studioAuthMode && !studioAccountId) {
+      toast.info(
+        t("studioAuth.saveWithoutLogin", {
+          defaultValue: "未登录工作室账号，请前往认证中心登录后刷新 key",
+        }),
+      );
+    }
 
     await onSubmit(payload);
   };
@@ -2343,6 +2453,16 @@ function ProviderFormFull({
               localProxyBodyOverride={localProxyBodyOverride}
               onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
               readOnlyTeamFields={teamManagedReadOnly}
+              isStudioAuthMode={studioAuthMode}
+              studioAccountId={studioAccountId}
+              studioAccountName={studioAccountName}
+              studioNeedsRelogin={studioNeedsRelogin}
+              onStudioAuthModeChange={setStudioAuthMode}
+              onStudioRefreshedKey={(newKey) => {
+                handleApiKeyChange(newKey);
+                setStudioNeedsRelogin(false);
+              }}
+              onGoToAuthCenter={onGoToAuthCenter}
             />
           )}
 

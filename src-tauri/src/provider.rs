@@ -330,12 +330,16 @@ pub struct AuthBinding {
     /// 认证来源
     #[serde(default)]
     pub source: AuthBindingSource,
-    /// 托管认证供应商标识（如 github_copilot）
+    /// 托管认证供应商标识（如 github_copilot / studio_account）
     #[serde(rename = "authProvider", skip_serializing_if = "Option::is_none")]
     pub auth_provider: Option<String>,
     /// 托管账号 ID；为空表示跟随该认证供应商的默认账号
     #[serde(rename = "accountId", skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    /// 登录凭证是否已失效，需重新登录（仅 managed_account 适用）。
+    /// 启动静默刷新失败（401）时置 true；成功登录/刷新后清回 false/None。
+    #[serde(rename = "needsRelogin", skip_serializing_if = "Option::is_none")]
+    pub needs_relogin: Option<bool>,
 }
 
 /// Claude Desktop 3P 写入模式。

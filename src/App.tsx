@@ -643,6 +643,11 @@ function App() {
     }
   };
 
+  const goToAuthCenter = () => {
+    setSettingsDefaultTab("auth");
+    setCurrentView("settings");
+  };
+
   const handleEditProvider = async ({
     provider,
     originalId,
@@ -1592,6 +1597,7 @@ function App() {
         onOpenChange={setIsAddOpen}
         appId={activeApp}
         onSubmit={addProvider}
+        onGoToAuthCenter={goToAuthCenter}
       />
 
       <EditProviderDialog
@@ -1605,6 +1611,7 @@ function App() {
         onSubmit={handleEditProvider}
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
+        onGoToAuthCenter={goToAuthCenter}
       />
 
       {effectiveUsageProvider && (

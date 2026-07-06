@@ -1,7 +1,25 @@
 use crate::app_config::AppType;
-use crate::provider::{ClaudeDesktopMode, Provider};
+use crate::provider::{AuthBinding, AuthBindingSource, ClaudeDesktopMode, Provider};
 
 use super::registry::{team_local_provider_id, TeamRegistryEntry};
+
+/// 给团队 provider 的 meta 注入工作室账号 authBinding（默认走自动获取模式）。
+/// accountId 留空——首次需用户点「登录」走后台回调拿到 key + accountId 后回填。
+/// 若 registry 已下发 authBinding（未来可能指定其他 auth_provider），则尊重其值不覆盖。
+fn with_studio_auth_binding(
+    mut meta: Option<crate::provider::ProviderMeta>,
+) -> Option<crate::provider::ProviderMeta> {
+    let m = meta.get_or_insert_with(Default::default);
+    if m.auth_binding.is_none() {
+        m.auth_binding = Some(AuthBinding {
+            source: AuthBindingSource::ManagedAccount,
+            auth_provider: Some("studio_account".to_string()),
+            account_id: None,
+            needs_relogin: None,
+        });
+    }
+    meta
+}
 
 impl TeamRegistryEntry {
     pub fn to_claude_provider(&self) -> Option<Provider> {
@@ -43,7 +61,7 @@ impl TeamRegistryEntry {
             created_at: None,
             sort_index: None,
             notes: self.notes.clone(),
-            meta: self.meta.clone(),
+            meta: with_studio_auth_binding(self.meta.clone()),
             icon: self.icon.clone(),
             icon_color: self.icon_color.clone(),
             in_failover_queue: false,
@@ -140,6 +158,15 @@ requires_openai_auth = true"#
         meta.claude_desktop_mode = Some(mode);
         if !desktop.model_routes.is_empty() {
             meta.claude_desktop_model_routes = desktop.model_routes;
+        }
+        // 默认走工作室账号自动获取；registry 已下发 authBinding 时尊重其值。
+        if meta.auth_binding.is_none() {
+            meta.auth_binding = Some(AuthBinding {
+                source: AuthBindingSource::ManagedAccount,
+                auth_provider: Some("studio_account".to_string()),
+                account_id: None,
+                needs_relogin: None,
+            });
         }
 
         Some(Provider {

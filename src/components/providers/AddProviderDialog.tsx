@@ -37,6 +37,7 @@ interface AddProviderDialogProps {
       ensureGrokBuildOfficialSeed?: boolean;
     },
   ) => Promise<void> | void;
+  onGoToAuthCenter?: () => void;
 }
 
 export function AddProviderDialog({
@@ -44,6 +45,7 @@ export function AddProviderDialog({
   onOpenChange,
   appId,
   onSubmit,
+  onGoToAuthCenter,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
   // OpenCode and OpenClaw don't support universal providers
@@ -391,6 +393,7 @@ export function AddProviderDialog({
               onCancel={() => onOpenChange(false)}
               onSubmittingChange={setIsFormSubmitting}
               showButtons={false}
+              onGoToAuthCenter={onGoToAuthCenter}
             />
           </TabsContent>
 
@@ -407,6 +410,7 @@ export function AddProviderDialog({
           onCancel={() => onOpenChange(false)}
           onSubmittingChange={setIsFormSubmitting}
           showButtons={false}
+          onGoToAuthCenter={onGoToAuthCenter}
         />
       )}
 

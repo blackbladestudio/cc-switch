@@ -475,13 +475,24 @@ fn is_managed_oauth_proxy_provider(provider: &Provider) -> bool {
     provider
         .meta
         .as_ref()
-        .and_then(|meta| meta.provider_type.as_deref())
-        .is_some_and(|provider_type| {
-            matches!(
-                provider_type,
-                "github_copilot" | "codex_oauth" | "xai_oauth"
-            )
+        .and_then(|meta| meta.auth_binding.as_ref())
+        .is_some_and(|binding| {
+            binding.source == crate::provider::AuthBindingSource::ManagedAccount
+                && matches!(
+                    binding.auth_provider.as_deref(),
+                    Some("github_copilot" | "codex_oauth" | "studio_account")
+                )
         })
+        || provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.provider_type.as_deref())
+            .is_some_and(|provider_type| {
+                matches!(
+                    provider_type,
+                    "github_copilot" | "codex_oauth" | "xai_oauth"
+                )
+            })
 }
 
 pub fn validate_provider(provider: &Provider) -> Result<(), AppError> {
