@@ -912,14 +912,14 @@ export function ClaudeDesktopProviderForm({
                 authProvider: "xai_oauth",
                 accountId: selectedXaiAccountId ?? undefined,
               }
-          : studioAuthMode
-            ? {
-                source: "managed_account",
-                authProvider: "studio_account",
-                accountId: studioAccountId ?? undefined,
-                needsRelogin: studioNeedsRelogin || undefined,
-              }
-            : undefined;
+            : studioAuthMode
+              ? {
+                  source: "managed_account",
+                  authProvider: "studio_account",
+                  accountId: studioAccountId ?? undefined,
+                  needsRelogin: studioNeedsRelogin || undefined,
+                }
+              : undefined;
     meta.codexFastMode =
       activeProviderType === "codex_oauth" ? codexFastMode : undefined;
 

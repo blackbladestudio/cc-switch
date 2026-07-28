@@ -801,15 +801,6 @@ export function CodexFormFields({
                     </p>
                   </div>
                 )}
-
-                <Switch
-                  checked={needsLocalRouting}
-                  onCheckedChange={handleLocalRoutingChange}
-                  disabled={readOnlyTeamFields}
-                  aria-label={t("codexConfig.localRoutingToggle", {
-                    defaultValue: "需要本地路由映射",
-                  })}
-                />
               </div>
             )}
 

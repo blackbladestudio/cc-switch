@@ -1722,14 +1722,14 @@ function ProviderFormFull({
                 authProvider: "xai_oauth",
                 accountId: selectedXaiAccountId ?? undefined,
               }
-          : studioAuthMode
-            ? {
-                source: "managed_account",
-                authProvider: "studio_account",
-                accountId: studioAccountId ?? undefined,
-                needsRelogin: studioNeedsRelogin || undefined,
-              }
-            : undefined,
+            : studioAuthMode
+              ? {
+                  source: "managed_account",
+                  authProvider: "studio_account",
+                  accountId: studioAccountId ?? undefined,
+                  needsRelogin: studioNeedsRelogin || undefined,
+                }
+              : undefined,
       // GitHub Copilot 多账号：保存关联的账号 ID
       githubAccountId:
         isCopilotProvider && selectedGitHubAccountId

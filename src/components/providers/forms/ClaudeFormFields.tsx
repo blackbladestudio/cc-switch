@@ -870,7 +870,9 @@ export function ClaudeFormFields({
               ? () => onEndpointModalToggle(true)
               : undefined
           }
-          showFullUrlToggle={showEndpointTools && !isXaiOauthPreset && !readOnlyTeamFields}
+          showFullUrlToggle={
+            showEndpointTools && !isXaiOauthPreset && !readOnlyTeamFields
+          }
           isFullUrl={isFullUrl}
           onFullUrlChange={readOnlyTeamFields ? undefined : onFullUrlChange}
           disabled={readOnlyTeamFields}
