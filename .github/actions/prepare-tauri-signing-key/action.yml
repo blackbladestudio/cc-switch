@@ -1,0 +1,34 @@
+name: Prepare Tauri signing key
+description: >-
+  Decode the fork signing secret once and export the Tauri private key with an
+  explicit password, including the empty password used by this fork.
+inputs:
+  private-key:
+    description: TAURI_SIGNING_PRIVATE_KEY secret
+    required: true
+  password:
+    description: TAURI_SIGNING_PRIVATE_KEY_PASSWORD secret
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Prepare Tauri signing key
+      shell: bash
+      env:
+        RAW: ${{ inputs.private-key }}
+        KEY_PASSWORD: ${{ inputs.password }}
+      run: |
+        set -euo pipefail
+        if [ -z "$RAW" ]; then
+          echo "缺少 Tauri 签名密钥" >&2
+          exit 1
+        fi
+        DECODED_KEY=$(printf '%s' "$RAW" | (base64 --decode 2>/dev/null || base64 -D 2>/dev/null))
+        if [ -z "$DECODED_KEY" ] || ! printf '%s' "$DECODED_KEY" | grep -Eq '^[A-Za-z0-9+/=]+$'; then
+          echo "签名密钥必须是 base64 包装的一行 Tauri 私钥" >&2
+          exit 1
+        fi
+        echo "::add-mask::$DECODED_KEY"
+        printf 'TAURI_SIGNING_PRIVATE_KEY=%s\n' "$DECODED_KEY" >> "$GITHUB_ENV"
+        printf 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD=%s\n' "$KEY_PASSWORD" >> "$GITHUB_ENV"

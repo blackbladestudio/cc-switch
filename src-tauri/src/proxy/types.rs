@@ -114,17 +114,10 @@ pub struct ProxyTakeoverStatus {
     pub codex: bool,
     pub gemini: bool,
     pub grokbuild: bool,
+    #[serde(rename = "claude-desktop", default)]
+    pub claude_desktop: bool,
     pub opencode: bool,
     pub openclaw: bool,
-}
-
-/// API 格式类型（预留，当前不需要格式转换）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum ApiFormat {
-    Claude,
-    OpenAI,
-    Gemini,
 }
 
 /// Provider健康状态

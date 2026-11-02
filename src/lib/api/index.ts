@@ -1,4 +1,5 @@
 export type { AppId } from "./types";
+export { piApi } from "./pi";
 export { providersApi, universalProvidersApi } from "./providers";
 export { settingsApi } from "./settings";
 export { teamProviderApi } from "./teamProvider";
@@ -14,7 +15,6 @@ export { proxyApi } from "./proxy";
 export { openclawApi } from "./openclaw";
 export { sessionsApi } from "./sessions";
 export { workspaceApi } from "./workspace";
-export * as configApi from "./config";
 export * as authApi from "./auth";
 export * as copilotApi from "./copilot";
 export type { ProviderSwitchEvent } from "./providers";
@@ -26,6 +26,7 @@ export type {
   GitHubAccount,
 } from "./copilot";
 export type {
+  AuthCenterTarget,
   ManagedAuthProvider,
   ManagedAuthAccount,
   ManagedAuthStatus,

@@ -1,6 +1,7 @@
+import { HelpTip } from "@/components/ui/help-tip";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Save, Plus, Globe } from "lucide-react";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,7 @@ export function PricingEditModal({
   return (
     <FullScreenPanel
       isOpen={open}
+      trackUnsavedChanges
       title={
         isNew
           ? t("usage.addPricing", "新增定价")
@@ -98,13 +100,11 @@ export function PricingEditModal({
         <Button
           type="submit"
           form="pricing-form"
+          variant="solid"
+          size="regular"
           disabled={updatePricing.isPending}
         >
-          {isNew ? (
-            <Plus className="h-4 w-4 mr-2" />
-          ) : (
-            <Save className="h-4 w-4 mr-2" />
-          )}
+          {isNew ? <Plus className="h-4 w-4" /> : <Save className="h-4 w-4" />}
           {updatePricing.isPending
             ? t("common.saving", "保存中...")
             : isNew
@@ -114,23 +114,23 @@ export function PricingEditModal({
       }
     >
       {isNew && (
-        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-border/50 bg-muted/20 px-3 py-2.5">
-          <p className="text-xs text-muted-foreground">
+        <div className="mb-6 flex items-center gap-2 rounded-panel border border-border bg-subtle px-3 py-2.5">
+          <Button
+            type="button"
+            variant="neutral"
+            size="compact"
+            onClick={() => setIsPickerOpen(true)}
+            className="shrink-0"
+          >
+            <Globe className="h-3.5 w-3.5" />
+            {t("usage.importFromModelsDev", "从 models.dev 导入")}
+          </Button>
+          <HelpTip title={t("usage.importFromModelsDev", "从 models.dev 导入")}>
             {t(
               "usage.modelsDevHint",
               "无需手动填写，可从 models.dev 选择模型定价",
             )}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setIsPickerOpen(true)}
-            className="shrink-0"
-          >
-            <Globe className="mr-1.5 h-4 w-4" />
-            {t("usage.importFromModelsDev", "从 models.dev 导入")}
-          </Button>
+          </HelpTip>
         </div>
       )}
 
@@ -171,7 +171,7 @@ export function PricingEditModal({
 
         <div className="space-y-2">
           <Label htmlFor="inputCost">
-            {t("usage.inputCostPerMillion", "输入成本 (每百万 tokens, CNY)")}
+            {t("usage.inputCostPerMillion", "输入成本 (每百万 tokens, USD)")}
           </Label>
           <Input
             id="inputCost"
@@ -188,7 +188,7 @@ export function PricingEditModal({
 
         <div className="space-y-2">
           <Label htmlFor="outputCost">
-            {t("usage.outputCostPerMillion", "输出成本 (每百万 tokens, CNY)")}
+            {t("usage.outputCostPerMillion", "输出成本 (每百万 tokens, USD)")}
           </Label>
           <Input
             id="outputCost"
@@ -207,7 +207,7 @@ export function PricingEditModal({
           <Label htmlFor="cacheReadCost">
             {t(
               "usage.cacheReadCostPerMillion",
-              "缓存读取成本 (每百万 tokens, CNY)",
+              "缓存读取成本 (每百万 tokens, USD)",
             )}
           </Label>
           <Input
@@ -227,7 +227,7 @@ export function PricingEditModal({
           <Label htmlFor="cacheCreationCost">
             {t(
               "usage.cacheCreationCostPerMillion",
-              "缓存写入成本 (每百万 tokens, CNY)",
+              "缓存写入成本 (每百万 tokens, USD)",
             )}
           </Label>
           <Input

@@ -224,7 +224,6 @@ impl TeamProviderService {
         let mut deleted = 0u32;
         for app in SUPPORTED_APPS {
             let app_type = app_type_from_str(app).unwrap();
-            let current_id = settings::get_effective_current_provider(db, &app_type)?;
             let providers = db.get_all_providers(app)?;
             for (id, provider) in providers {
                 let is_removed = provider
@@ -236,7 +235,10 @@ impl TeamProviderService {
                 if !is_removed {
                     continue;
                 }
-                if current_id.as_deref() == Some(id.as_str()) {
+                // 批量清理不改写客户端文件，仍被直连、代理路由或 Stack 引用的配置先保留。
+                if crate::mode::current::is_referenced(db, &app_type, &id)?
+                    || crate::mode::stack::is_member(&app_type, &id)?
+                {
                     continue;
                 }
                 db.delete_provider(app, &id)?;

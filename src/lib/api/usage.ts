@@ -8,12 +8,14 @@ import type {
   RequestLog,
   LogFilters,
   ModelPricing,
+  ModelsDevSyncConfig,
+  ModelsDevSyncState,
   ProviderLimitStatus,
   PaginatedLogs,
   SessionSyncResult,
   DataSourceSummary,
 } from "@/types/usage";
-import type { UsageResult } from "@/types";
+import type { FetchedExchangeRates, UsageResult } from "@/types";
 import type { AppId } from "./types";
 import type { TemplateType } from "@/config/constants";
 
@@ -64,6 +66,13 @@ export const usageApi = {
     });
   },
 
+  getSessionUsageSummary: async (
+    appType: string,
+    sessionId: string,
+  ): Promise<UsageSummary> => {
+    return invoke("get_session_usage_summary", { appType, sessionId });
+  },
+
   getUsageSummaryByApp: async (
     startDate?: number,
     endDate?: number,
@@ -88,6 +97,19 @@ export const usageApi = {
     return invoke("get_usage_trends", {
       startDate,
       endDate,
+      appType,
+      providerName,
+      model,
+    });
+  },
+
+  /** 最早有用量记录的本地日期 `YYYY-MM-DD`，没有记录时为 null */
+  getUsageFirstDate: async (
+    appType?: string,
+    providerName?: string,
+    model?: string,
+  ): Promise<string | null> => {
+    return invoke("get_usage_first_date", {
       appType,
       providerName,
       model,
@@ -164,6 +186,27 @@ export const usageApi = {
     });
   },
 
+  updateModelPricingBatch: async (entries: ModelPricing[]): Promise<number> => {
+    return invoke("update_model_pricing_batch", { entries });
+  },
+
+  getModelsDevSyncConfig: async (): Promise<ModelsDevSyncState> => {
+    return invoke("get_models_dev_sync_config");
+  },
+
+  saveModelsDevSyncConfig: async (
+    config: ModelsDevSyncConfig,
+  ): Promise<void> => {
+    return invoke("save_models_dev_sync_config", { config });
+  },
+
+  recordModelsDevSyncResult: async (
+    syncedAt: number | null,
+    error: string | null,
+  ): Promise<void> => {
+    return invoke("record_models_dev_sync_result", { syncedAt, error });
+  },
+
   deleteModelPricing: async (modelId: string): Promise<void> => {
     return invoke("delete_model_pricing", { modelId });
   },
@@ -185,11 +228,21 @@ export const usageApi = {
     return invoke("sync_session_usage");
   },
 
+  /** 会话日志扫描（后台定时或手动同步）最近一次完成的时间（毫秒）；本次启动后还没扫过时为 null */
+  getSessionUsageLastSync: async (): Promise<number | null> => {
+    return invoke("get_session_usage_last_sync");
+  },
+
   rebuildCodexUsage: async (): Promise<SessionSyncResult> => {
     return invoke("rebuild_codex_usage");
   },
 
   getDataSourceBreakdown: async (): Promise<DataSourceSummary[]> => {
     return invoke("get_usage_data_sources");
+  },
+
+  /** 取 USD 对各显示币种的汇率：主源 open.er-api.com，失败退 floatrates.com */
+  fetchExchangeRates: async (): Promise<FetchedExchangeRates> => {
+    return invoke("fetch_exchange_rates");
   },
 };

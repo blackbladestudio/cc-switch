@@ -9,7 +9,20 @@ use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricin
 use rusqlite::OptionalExtension;
 use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
-use std::str::FromStr;
+
+/// `proxy_request_logs.error_message` 的字符数上限。上游错误体（中转站整页
+/// HTML、长 JSON）原样入库时，高频报错能把库撑到数 GB（#6706）。按字符而非
+/// 字节截断，不会切坏 UTF-8；取值与 Pi 会话导入的 errorMessage 上限一致。
+pub(crate) const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
+
+/// 保留错误信息的前 `MAX_ERROR_MESSAGE_CHARS` 个字符：状态行、错误码和
+/// 错误描述都在开头，定位问题足够。
+fn bound_error_message(message: &str) -> &str {
+    match message.char_indices().nth(MAX_ERROR_MESSAGE_CHARS) {
+        Some((byte_index, _)) => &message[..byte_index],
+        None => message,
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct UsageSemantic {
@@ -90,7 +103,7 @@ pub struct RequestLog {
 /// 使用量记录器
 pub struct UsageLogger<'a> {
     db: &'a Database,
-    /// 内置定价覆盖层（CNY，编译期嵌入资源）。None 表示无覆盖层（测试/旧路径）。
+    /// 测试用的额外定价覆盖层；None 时走共用查询，仍会优先使用内置工作室定价。
     user_pricing: Option<&'a crate::services::user_pricing::UserPricingConfig>,
 }
 
@@ -103,8 +116,9 @@ impl<'a> UsageLogger<'a> {
         }
     }
 
-    /// 带 user pricing 覆盖层构造。生产路径从 AppState 注入。
+    /// 测试时注入额外定价，生产路径通过共用查询读取内置定价。
     /// 调用方负责在 logger 使用期间保持 `user_pricing` 存活。
+    #[cfg(test)]
     pub fn new_with_overlay(
         db: &'a Database,
         user_pricing: &'a crate::services::user_pricing::UserPricingConfig,
@@ -184,6 +198,7 @@ impl<'a> UsageLogger<'a> {
         } else {
             "INSERT OR IGNORE"
         };
+        let error_message = log.error_message.as_deref().map(bound_error_message);
         let sql = format!(
             "{insert_verb} INTO proxy_request_logs (
                 request_id, provider_id, app_type, model, request_model, pricing_model,
@@ -217,7 +232,7 @@ impl<'a> UsageLogger<'a> {
                     log.latency_ms as i64,
                     log.first_token_ms.map(|v| v as i64),
                     log.status_code as i64,
-                    log.error_message,
+                    error_message,
                     log.session_id,
                     log.provider_type,
                     log.is_streaming as i64,
@@ -370,99 +385,28 @@ impl<'a> UsageLogger<'a> {
         }
     }
 
-    /// 获取有效的倍率与计费模式来源（供应商优先，未配置则回退全局默认）
-    pub async fn resolve_pricing_config(
-        &self,
-        provider_id: &str,
-        app_type: &str,
-    ) -> (Decimal, String) {
-        // Claude Desktop 网关没有独立的全局计费配置（proxy_config 的 CHECK 仅
-        // 允许 claude/codex/gemini，前端也只暴露三项），全局默认继承 claude；
-        // 供应商级 meta 覆盖仍按 claude-desktop 查找（providers 表按该 app_type 存）。
+    /// 获取计费模式来源（按请求模型 / 按返回模型），只读应用级全局配置
+    pub async fn resolve_pricing_model_source(&self, app_type: &str) -> String {
+        // Claude Desktop 网关没有独立的全局计费配置（proxy_config 的 CHECK 不含
+        // claude-desktop），继承 claude 的设置。
         let default_app_type = if app_type == "claude-desktop" {
             "claude"
         } else {
             app_type
         };
-        let default_multiplier_raw =
-            match self.db.get_default_cost_multiplier(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认倍率失败 (app_type={app_type}): {e}");
-                    "1".to_string()
-                }
-            };
-        let default_multiplier = match Decimal::from_str(&default_multiplier_raw) {
-            Ok(value) => value,
+        match self.db.get_pricing_model_source(default_app_type).await {
+            Ok(value) if value == PRICING_SOURCE_RESPONSE || value == PRICING_SOURCE_REQUEST => {
+                value
+            }
+            Ok(value) => {
+                log::warn!("[USG-003] 计费模式无效 (app_type={app_type}): {value}");
+                PRICING_SOURCE_RESPONSE.to_string()
+            }
             Err(e) => {
-                log::warn!(
-                    "[USG-003] 默认倍率解析失败 (app_type={app_type}): {default_multiplier_raw} - {e}"
-                );
-                Decimal::from(1)
+                log::warn!("[USG-003] 获取计费模式失败 (app_type={app_type}): {e}");
+                PRICING_SOURCE_RESPONSE.to_string()
             }
-        };
-
-        let default_pricing_source_raw =
-            match self.db.get_pricing_model_source(default_app_type).await {
-                Ok(value) => value,
-                Err(e) => {
-                    log::warn!("[USG-003] 获取默认计费模式失败 (app_type={app_type}): {e}");
-                    PRICING_SOURCE_RESPONSE.to_string()
-                }
-            };
-        let default_pricing_source = if default_pricing_source_raw == PRICING_SOURCE_RESPONSE
-            || default_pricing_source_raw == PRICING_SOURCE_REQUEST
-        {
-            default_pricing_source_raw
-        } else {
-            log::warn!(
-                "[USG-003] 默认计费模式无效 (app_type={app_type}): {default_pricing_source_raw}"
-            );
-            PRICING_SOURCE_RESPONSE.to_string()
-        };
-
-        let provider = self
-            .db
-            .get_provider_by_id(provider_id, app_type)
-            .ok()
-            .flatten();
-
-        let (provider_multiplier, provider_pricing_source) = provider
-            .as_ref()
-            .and_then(|p| p.meta.as_ref())
-            .map(|meta| {
-                (
-                    meta.cost_multiplier.as_deref(),
-                    meta.pricing_model_source.as_deref(),
-                )
-            })
-            .unwrap_or((None, None));
-
-        let cost_multiplier = match provider_multiplier {
-            Some(value) => match Decimal::from_str(value) {
-                Ok(parsed) => parsed,
-                Err(e) => {
-                    log::warn!(
-                        "[USG-003] 供应商倍率解析失败 (provider_id={provider_id}): {value} - {e}"
-                    );
-                    default_multiplier
-                }
-            },
-            None => default_multiplier,
-        };
-
-        let pricing_model_source = match provider_pricing_source {
-            Some(value) if value == PRICING_SOURCE_RESPONSE || value == PRICING_SOURCE_REQUEST => {
-                value.to_string()
-            }
-            Some(value) => {
-                log::warn!("[USG-003] 供应商计费模式无效 (provider_id={provider_id}): {value}");
-                default_pricing_source.clone()
-            }
-            None => default_pricing_source.clone(),
-        };
-
-        (cost_multiplier, pricing_model_source)
+        }
     }
 
     /// 计算并记录请求
@@ -476,7 +420,6 @@ impl<'a> UsageLogger<'a> {
         request_model: String,
         pricing_model: String,
         usage: TokenUsage,
-        cost_multiplier: Decimal,
         latency_ms: u64,
         first_token_ms: Option<u64>,
         status_code: u16,
@@ -499,7 +442,7 @@ impl<'a> UsageLogger<'a> {
             &app_type,
             &usage,
             pricing.as_ref(),
-            cost_multiplier,
+            Decimal::ONE,
         );
 
         let log = RequestLog {
@@ -518,7 +461,7 @@ impl<'a> UsageLogger<'a> {
             session_id,
             provider_type,
             is_streaming,
-            cost_multiplier: cost_multiplier.to_string(),
+            cost_multiplier: "1".to_string(),
         };
 
         self.log_request(&log)
@@ -528,6 +471,7 @@ impl<'a> UsageLogger<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     fn request_log(request_id: &str, input_tokens: u32) -> RequestLog {
         RequestLog {
@@ -542,6 +486,7 @@ mod tests {
                 output_tokens: 5,
                 cache_read_tokens: 2,
                 cache_creation_tokens: 0,
+                cache_creation_1h_tokens: 0,
                 model: None,
                 message_id: Some("resp-1".to_string()),
             },
@@ -579,6 +524,7 @@ mod tests {
             output_tokens: 500,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_creation_1h_tokens: 0,
             model: None,
             message_id: None,
         };
@@ -591,7 +537,6 @@ mod tests {
             "req-model".to_string(),
             "test-model".to_string(),
             usage,
-            Decimal::from(1),
             100,
             None,
             200,
@@ -712,6 +657,58 @@ mod tests {
     }
 
     #[test]
+    fn claude_desktop_proxy_replaces_matching_session_log_row() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        {
+            let conn = crate::database::lock_conn!(db.conn);
+            conn.execute(
+                "INSERT INTO proxy_request_logs (
+                    request_id, provider_id, app_type, model, input_tokens,
+                    output_tokens, cache_read_tokens, cache_creation_tokens,
+                    latency_ms, status_code, created_at, data_source
+                 ) VALUES ('session:msg_desktop', '_session', 'claude',
+                    'claude-sonnet-4-5', 10, 5, 2, 1, 0, 200, 1, 'session_log')",
+                [],
+            )?;
+        }
+
+        let usage = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 2,
+            cache_creation_tokens: 1,
+            cache_creation_1h_tokens: 0,
+            model: Some("claude-sonnet-4-5".to_string()),
+            message_id: Some("msg_desktop".to_string()),
+        };
+        let request_id = usage.dedup_request_id(crate::proxy::usage::parser::dedup_scope_for_app(
+            "claude-desktop",
+            "desktop-provider",
+        ));
+        let mut proxy_log = request_log(&request_id, 10);
+        proxy_log.provider_id = "desktop-provider".to_string();
+        proxy_log.app_type = "claude-desktop".to_string();
+        proxy_log.model = "claude-sonnet-4-5".to_string();
+        proxy_log.request_model = "claude-sonnet-4-5".to_string();
+        proxy_log.pricing_model = "claude-sonnet-4-5".to_string();
+        proxy_log.usage = usage;
+
+        UsageLogger::new(&db).log_request(&proxy_log)?;
+
+        let conn = crate::database::lock_conn!(db.conn);
+        let (count, source, app_type): (i64, String, String) = conn.query_row(
+            "SELECT COUNT(*), data_source, app_type FROM proxy_request_logs
+             WHERE request_id = 'session:msg_desktop'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(count, 1);
+        assert_eq!(source, "proxy");
+        assert_eq!(app_type, "claude-desktop");
+        Ok(())
+    }
+
+    #[test]
     fn test_log_error() -> Result<(), AppError> {
         let db = Database::memory()?;
         let logger = UsageLogger::new(&db);
@@ -737,6 +734,52 @@ mod tests {
             .unwrap();
         assert_eq!(status, 500);
         assert_eq!(error, Some("Internal Server Error".to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn bound_error_message_keeps_char_boundaries() {
+        assert_eq!(bound_error_message(""), "");
+        assert_eq!(bound_error_message("short"), "short");
+
+        let exact = "e".repeat(MAX_ERROR_MESSAGE_CHARS);
+        assert_eq!(bound_error_message(&exact), exact);
+
+        // 3 字节（汉）与 4 字节（emoji）字符：按字符计数，截断点落在字符边界
+        for unit in ["汉", "🦀"] {
+            let long = unit.repeat(MAX_ERROR_MESSAGE_CHARS + 1);
+            let bounded = bound_error_message(&long);
+            assert_eq!(bounded.chars().count(), MAX_ERROR_MESSAGE_CHARS);
+            assert_eq!(bounded, unit.repeat(MAX_ERROR_MESSAGE_CHARS));
+        }
+    }
+
+    #[test]
+    fn log_error_bounds_oversized_error_message() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db);
+
+        // #6706：中转站返回数 MB 的整页 HTML 报错，不能原样入库
+        let prefix = "HTTP 502 Bad Gateway: <html><title>上游错误</title>";
+        let body = format!("{prefix}{}", "🦀".repeat(MAX_ERROR_MESSAGE_CHARS * 100));
+        logger.log_error(
+            "req-huge-error".to_string(),
+            "provider-1".to_string(),
+            "claude".to_string(),
+            "claude-sonnet-4-5".to_string(),
+            502,
+            body,
+            50,
+        )?;
+
+        let conn = crate::database::lock_conn!(db.conn);
+        let stored: String = conn.query_row(
+            "SELECT error_message FROM proxy_request_logs WHERE request_id = 'req-huge-error'",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(stored.chars().count(), MAX_ERROR_MESSAGE_CHARS);
+        assert!(stored.starts_with(prefix));
         Ok(())
     }
 
@@ -777,15 +820,15 @@ mod tests {
 
     #[test]
     fn test_overlay_pricing_resolves_model_missing_from_db() -> Result<(), AppError> {
-        // 验证 USG-002 修复：DB 里没有 glm-5.2，但 user pricing 覆盖层能命中，
+        // 验证 USG-002 修复：DB 里没有 studio-test-overlay-only，但 user pricing 覆盖层能命中，
         // get_model_pricing 返回 Some，成本可计算，不会落到 USG-002 分支。
         let db = Database::memory()?;
 
         let mut models = std::collections::HashMap::new();
         models.insert(
-            "glm-5.2".to_string(),
+            "studio-test-overlay-only".to_string(),
             crate::services::user_pricing::UserPricingEntry {
-                display_name: "GLM-5.2".to_string(),
+                display_name: "Studio Test Overlay Only".to_string(),
                 input: Decimal::from_str("1.4").unwrap(),
                 output: Decimal::from_str("4.4").unwrap(),
                 cache_read: Decimal::from_str("0.26").unwrap(),
@@ -799,14 +842,16 @@ mod tests {
 
         let logger = UsageLogger::new_with_overlay(&db, &overlay);
 
-        // DB 里没有 glm-5.2 —— 没有 overlay 时应返回 None
+        // DB 里没有 studio-test-overlay-only —— 没有 overlay 时应返回 None
         let logger_no_overlay = UsageLogger::new(&db);
-        assert!(logger_no_overlay.get_model_pricing("glm-5.2")?.is_none());
+        assert!(logger_no_overlay
+            .get_model_pricing("studio-test-overlay-only")?
+            .is_none());
 
         // 有 overlay 时应命中并返回折算后的定价
         let pricing = logger
-            .get_model_pricing("glm-5.2")?
-            .expect("overlay 应命中 glm-5.2");
+            .get_model_pricing("studio-test-overlay-only")?
+            .expect("overlay 应命中 studio-test-overlay-only");
         // 1.4 CNY ÷ 7.14 ≈ 0.1961
         assert!(pricing.input_cost_per_million > Decimal::ZERO);
         assert_eq!(

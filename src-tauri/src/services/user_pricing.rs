@@ -1,12 +1,11 @@
 //! 内置模型定价表（随应用发布）
 //!
 //! 定价以人民币（CNY / 1M tokens）填写，编译期通过 `include_str!` 嵌入二进制
-//! （`src/resources/builtin_pricing.json`），启动加载到内存覆盖层。查找时优先
+//! （`src/resources/builtin_pricing.json`），首次使用时加载到内存覆盖层。查找时优先
 //! 命中本表，miss 再回退 DB `model_pricing` 表。
 //!
-//! 计算器 `ModelPricing` 的字段是无单位 `Decimal`，DB 种子价已按
-//! `CNY ÷ rate` 折成内部单位（见 `database::schema` 注释）。这里在加载时把
-//! CNY 价 ÷ `rate` 折成同一内部单位，保证历史成本数据口径一致。升级应用即
+//! 计算器和 DB 定价统一使用 USD。这里在查询时把 CNY 价 ÷ `rate` 折成 USD，
+//! 保证代理记录、会话导入和历史回填的成本口径一致。升级应用即
 //! 更新本表，用户无需（也无法）手动编辑。
 
 use std::collections::HashMap;
@@ -18,7 +17,7 @@ use serde::Deserialize;
 use crate::proxy::usage::calculator::ModelPricing;
 use crate::services::usage_stats::{is_placeholder_pricing_model, model_pricing_candidates};
 
-/// 默认 CNY→内部单位汇率（与种子价 historical 折算一致）
+/// 默认 CNY→USD 汇率（沿用工作室历史定价的折算比例）
 const DEFAULT_RATE: &str = "7.14";
 
 /// 内置定价资源（编译期嵌入）
@@ -104,6 +103,12 @@ fn default_rate() -> Decimal {
     Decimal::from_str(DEFAULT_RATE).unwrap_or(Decimal::ONE)
 }
 
+/// 编译期资源只加载一次，供所有代理与会话导入管线共用。
+pub fn builtin_pricing() -> &'static UserPricingConfig {
+    static PRICING: std::sync::OnceLock<UserPricingConfig> = std::sync::OnceLock::new();
+    PRICING.get_or_init(UserPricingConfig::load)
+}
+
 impl UserPricingConfig {
     /// 从编译期嵌入的内置定价资源加载；解析失败时返回空配置（记 warn，不阻断启动）
     pub fn load() -> Self {
@@ -179,6 +184,7 @@ impl UserPricingConfig {
         })
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.models.is_empty()
     }
