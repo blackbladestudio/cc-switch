@@ -16,18 +16,18 @@
       "ja": "集約モード：複数プロバイダーのモデルを 1 つの一覧にまとめ、クライアント内で切り替え"
     },
     {
-      "type": "improve",
-      "zh": "会话管理重写：每一轮做了什么、改了什么、哪步失败，一目了然",
-      "zh-TW": "工作階段管理重寫：每一輪做了什麼、改了什麼、哪步失敗，一目了然",
-      "en": "Rewritten sessions: see what each turn did, what it changed and where it failed",
-      "ja": "セッション管理を刷新：各ターンで何をし、何を変え、どこで失敗したかが一目で"
+      "type": "new",
+      "zh": "Codex 新增团队 ChatGPT 预置，同步后填写个人 Key 即可使用",
+      "zh-TW": "Codex 新增團隊 ChatGPT 預設，同步後填入個人 Key 即可使用",
+      "en": "Codex adds a team ChatGPT preset: sync it and enter your personal API Console key",
+      "ja": "Codex にチーム用 ChatGPT 設定を追加。同期して個人の API キーを入力するだけ"
     },
     {
       "type": "improve",
-      "zh": "切换供应商只替换地址、凭据、模型等关键字段，自定义配置不再丢失",
-      "zh-TW": "切換供應商只替換位址、憑證、模型等關鍵欄位，自訂設定不再遺失",
-      "en": "Switching providers only replaces the URL, credentials and model; custom settings are no longer lost",
-      "ja": "切り替え時はアドレス・認証情報・モデルなどだけを置き換え、カスタム設定が失われなくなりました"
+      "zh": "保留工作室登录、人民币定价和模型接口覆盖，团队同步保留个人 Key",
+      "zh-TW": "保留工作室登入、人民幣定價及模型介面覆寫，團隊同步保留個人 Key",
+      "en": "Studio login, CNY pricing and model overrides remain; team sync keeps personal keys",
+      "ja": "スタジオログイン・人民元料金・モデル別設定を維持。チーム同期でも個人キーを保持"
     }
   ]
 }
