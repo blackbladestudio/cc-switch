@@ -2,7 +2,7 @@
   "$schema": "./team-provider-registry.schema.json",
   "version": 1,
   "teamId": "blackblade",
-  "updatedAt": "2026-06-24T12:30:00Z",
+  "updatedAt": "2026-11-02T11:05:34Z",
   "providers": [
     {
       "id": "blackblade",
@@ -52,6 +52,28 @@
           "myog-5.5": "openai_chat",
           "deepseek-v4-pro": "openai_chat",
           "glm-5.2": "openai_chat"
+        }
+      }
+    },
+    {
+      "id": "blackblade-chatgpt",
+      "name": "BlackBlade ChatGPT",
+      "apps": ["codex"],
+      "baseUrl": "http://apiconsole.blackblade.com/v1",
+      "apiKeyPolicy": "local_required",
+      "websiteUrl": "http://apiconsole.blackblade.com",
+      "notes": "在 API Console 使用飞书登录并创建个人令牌，分组选择 bedrock；在此配置填写个人 API Key 即可。若没有 bedrock 分组选项，请联系管理员开通。地址、模型和 Responses 协议已预置，无需填写 AWS Key 或登录工作室自动取 Key。",
+      "icon": "openai",
+      "models": {
+        "codex": {
+          "model": "gpt-6.1-sol",
+          "reasoningEffort": "high"
+        }
+      },
+      "meta": {
+        "apiFormat": "openai_responses",
+        "authBinding": {
+          "source": "provider_config"
         }
       }
     }

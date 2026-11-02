@@ -273,6 +273,71 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blackblade_chatgpt_registry_uses_native_responses_and_preserves_personal_key() {
+        let registry: super::super::registry::TeamProviderRegistry = serde_json::from_str(
+            include_str!("../../../../docs/examples/team-blackblade-registry.json"),
+        )
+        .unwrap();
+        super::super::validate::validate_registry(&registry).unwrap();
+        let entry = registry
+            .providers
+            .iter()
+            .find(|entry| entry.id == "blackblade-chatgpt")
+            .expect("工作室 Registry 应包含独立的 ChatGPT 配置");
+        let provider = entry.to_codex_provider().unwrap();
+        assert_eq!(provider.id, "team-codex-blackblade-chatgpt");
+        assert_eq!(provider.settings_config["auth"]["OPENAI_API_KEY"], "");
+        let config: toml::Value =
+            toml::from_str(provider.settings_config["config"].as_str().unwrap()).unwrap();
+        assert_eq!(config["model"].as_str(), Some("gpt-6.1-sol"));
+        assert_eq!(
+            config["model_providers"]["custom"]["base_url"].as_str(),
+            Some("http://apiconsole.blackblade.com/v1")
+        );
+        assert_eq!(
+            config["model_providers"]["custom"]["wire_api"].as_str(),
+            Some("responses")
+        );
+        let meta = provider.meta.as_ref().unwrap();
+        assert_eq!(meta.api_format.as_deref(), Some("openai_responses"));
+        assert_eq!(
+            meta.auth_binding.as_ref().unwrap().source,
+            AuthBindingSource::ProviderConfig
+        );
+        assert!(meta.model_api_formats.is_empty());
+        assert!(meta.model_api_overrides.is_empty());
+        assert!(
+            !crate::proxy::providers::should_convert_codex_responses_to_chat(
+                &provider,
+                "/v1/responses"
+            )
+        );
+        assert!(
+            !crate::proxy::providers::should_convert_codex_responses_to_anthropic(
+                &provider,
+                "/v1/responses"
+            )
+        );
+
+        // 重同步必须保留员工填写的 Key，不能恢复成 Registry 的空占位。
+        let mut existing = provider;
+        existing.settings_config["auth"]["OPENAI_API_KEY"] = serde_json::json!("test-personal-key");
+        let merged = super::super::merge::merge_team_provider(
+            Some(&existing),
+            entry.to_codex_provider().unwrap(),
+            &AppType::Codex,
+        );
+        assert_eq!(
+            merged.settings_config["auth"]["OPENAI_API_KEY"],
+            "test-personal-key"
+        );
+        assert_eq!(
+            merged.meta.unwrap().api_format.as_deref(),
+            Some("openai_responses")
+        );
+    }
+
+    #[test]
     fn maps_registry_entry_to_team_provider_ids() {
         let entry = TeamRegistryEntry {
             id: "newapi".to_string(),
