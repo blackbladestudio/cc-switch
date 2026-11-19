@@ -107,12 +107,15 @@ wire_api = "responses"
 requires_openai_auth = true"#
         );
 
-        let settings_config = serde_json::json!({
+        let mut settings_config = serde_json::json!({
             "auth": {
                 "OPENAI_API_KEY": ""
             },
             "config": config_toml
         });
+        if let Some(catalog) = models.and_then(|m| m.model_catalog.as_ref()) {
+            settings_config["modelCatalog"] = catalog.clone();
+        }
 
         Some(Provider {
             id: team_local_provider_id("codex", &self.id),
@@ -289,7 +292,13 @@ mod tests {
         assert_eq!(provider.settings_config["auth"]["OPENAI_API_KEY"], "");
         let config: toml::Value =
             toml::from_str(provider.settings_config["config"].as_str().unwrap()).unwrap();
-        assert_eq!(config["model"].as_str(), Some("gpt-6.1-sol"));
+        assert_eq!(config["model"].as_str(), Some("gpt-6.2-sol"));
+        let catalog = provider.settings_config["modelCatalog"]["models"]
+            .as_array()
+            .unwrap();
+        assert_eq!(catalog.len(), 2);
+        assert_eq!(catalog[0]["model"], "gpt-6.2-sol");
+        assert_eq!(catalog[1]["model"], "gpt-6.2-astra");
         assert_eq!(
             config["model_providers"]["custom"]["base_url"].as_str(),
             Some("http://apiconsole.blackblade.com/v1")

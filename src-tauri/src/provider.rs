@@ -819,6 +819,8 @@ pub struct CodexModelConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "reasoningEffort")]
     pub reasoning_effort: Option<String>,
+    #[serde(rename = "modelCatalog", skip_serializing_if = "Option::is_none")]
+    pub model_catalog: Option<serde_json::Value>,
 }
 
 /// Gemini 模型配置
@@ -1506,6 +1508,7 @@ mod tests {
         universal.models.codex = Some(CodexModelConfig {
             model: Some("gpt-4o-mini".to_string()),
             reasoning_effort: Some("low".to_string()),
+            model_catalog: None,
         });
 
         let provider = universal.to_codex_provider().expect("codex provider");

@@ -66,8 +66,36 @@
       "icon": "openai",
       "models": {
         "codex": {
-          "model": "gpt-6.1-sol",
-          "reasoningEffort": "high"
+          "model": "gpt-6.2-sol",
+          "reasoningEffort": "high",
+          "modelCatalog": {
+            "models": [
+              {
+                "model": "gpt-6.2-sol",
+                "displayName": "gpt-6.2-sol",
+                "contextWindow": 272000,
+                "reasoningLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              },
+              {
+                "model": "gpt-6.2-astra",
+                "displayName": "gpt-6.2-astra",
+                "contextWindow": 272000,
+                "reasoningLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ]
+              }
+            ]
+          }
         }
       },
       "meta": {
