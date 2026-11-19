@@ -183,7 +183,7 @@ describe("ProviderForm Stack layout (Claude Code)", () => {
       }),
     );
     expect(
-      screen.getByText("以下两项只在路由、聚合模式下生效。"),
+      screen.getByText("以下设置只在路由、聚合模式下生效。"),
     ).toBeVisible();
     expect(
       screen.getByRole("button", { name: "自定义 User-Agent" }),

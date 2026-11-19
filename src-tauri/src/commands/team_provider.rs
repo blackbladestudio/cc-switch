@@ -1,6 +1,6 @@
 use tauri::{AppHandle, Emitter, State};
 
-use crate::services::team_provider::{TeamProviderRegistry, TeamProviderService};
+use crate::services::team_provider::TeamProviderService;
 use crate::settings::{TeamProviderSyncSettings, TeamSyncApplySummary, TeamSyncStatus};
 use crate::store::AppState;
 
@@ -18,14 +18,6 @@ pub fn save_team_sync_settings(settings: Option<TeamProviderSyncSettings>) -> Re
 #[tauri::command]
 pub fn get_team_sync_status() -> Result<TeamSyncStatus, String> {
     Ok(crate::services::team_provider::auto_sync::get_sync_status())
-}
-
-#[tauri::command]
-pub async fn fetch_team_registry(source_url: String) -> Result<TeamProviderRegistry, String> {
-    TeamProviderService::fetch_registry_only(&source_url)
-        .await
-        .map(|(registry, _etag)| registry)
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

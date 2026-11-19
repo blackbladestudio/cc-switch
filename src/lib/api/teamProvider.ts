@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
-  TeamProviderRegistry,
   TeamProviderSyncSettings,
   TeamSyncApplySummary,
   TeamSyncStatus,
@@ -21,12 +20,6 @@ export const teamProviderApi = {
 
   async getSyncStatus(): Promise<TeamSyncStatus> {
     return (await invoke("get_team_sync_status")) as TeamSyncStatus;
-  },
-
-  async fetchRegistry(sourceUrl: string): Promise<TeamProviderRegistry> {
-    return (await invoke("fetch_team_registry", {
-      sourceUrl,
-    })) as TeamProviderRegistry;
   },
 
   async applyRegistry(sourceUrl: string): Promise<TeamSyncApplySummary> {

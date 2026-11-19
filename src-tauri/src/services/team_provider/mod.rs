@@ -54,9 +54,10 @@ impl TeamProviderService {
         for entry in &registry.providers {
             for app in SUPPORTED_APPS {
                 if !entry.has_app(app) {
-                    if let Some(existing) =
-                        db.get_provider_by_id(&team_local_provider_id(app, &entry.id), app)?
-                    {
+                    if let Some(existing) = db.get_provider_by_id(
+                        &team_local_provider_id(app, &entry.id),
+                        &app_type_from_str(app).unwrap(),
+                    )? {
                         if mark_removed_if_team_managed(&existing, db, app, &mut summary)? {
                             summary.removed += 1;
                         }
@@ -68,7 +69,8 @@ impl TeamProviderService {
                     continue;
                 };
                 let provider_id = incoming.id.clone();
-                let existing = db.get_provider_by_id(&provider_id, app)?;
+                let existing =
+                    db.get_provider_by_id(&provider_id, &app_type_from_str(app).unwrap())?;
 
                 if let Some(existing) = existing.as_ref() {
                     if should_report_conflict(existing, &incoming, app) {
@@ -99,7 +101,7 @@ impl TeamProviderService {
                 );
 
                 let is_create = existing.is_none();
-                db.save_provider(app, &final_provider)?;
+                db.save_provider(&app_type_from_str(app).unwrap(), &final_provider)?;
                 if is_create {
                     summary.created += 1;
                 } else {
@@ -162,7 +164,7 @@ impl TeamProviderService {
         source_url: &str,
     ) -> Result<(), AppError> {
         let existing = db
-            .get_provider_by_id(provider_id, app)?
+            .get_provider_by_id(provider_id, &app_type_from_str(app).unwrap())?
             .ok_or_else(|| AppError::Message(format!("Provider {provider_id} 不存在")))?;
 
         let registry_entry_id = existing
@@ -200,7 +202,7 @@ impl TeamProviderService {
                     team_managed.local_override = Some(false);
                 }
             }
-            db.save_provider(app, &final_provider)?;
+            db.save_provider(&app_type_from_str(app).unwrap(), &final_provider)?;
         } else if let Some(mut provider) = existing.into() {
             let locked_fields = locked_fields_for_app(app);
             let local_hash = compute_locked_fields_hash(&provider, &locked_fields);
@@ -212,7 +214,7 @@ impl TeamProviderService {
             });
             team_managed.local_override = Some(true);
             team_managed.local_fields_hash = Some(local_hash);
-            db.save_provider(app, &provider)?;
+            db.save_provider(&app_type_from_str(app).unwrap(), &provider)?;
         }
 
         clear_pending_conflict(provider_id, app)?;
@@ -224,7 +226,7 @@ impl TeamProviderService {
         let mut deleted = 0u32;
         for app in SUPPORTED_APPS {
             let app_type = app_type_from_str(app).unwrap();
-            let providers = db.get_all_providers(app)?;
+            let providers = db.get_all_providers(&app_type_from_str(app).unwrap())?;
             for (id, provider) in providers {
                 let is_removed = provider
                     .meta
@@ -241,7 +243,7 @@ impl TeamProviderService {
                 {
                     continue;
                 }
-                db.delete_provider(app, &id)?;
+                db.delete_provider(&app_type_from_str(app).unwrap(), &id)?;
                 deleted += 1;
             }
         }
@@ -375,7 +377,7 @@ fn mark_removed_if_team_managed(
     if let Some(tm) = meta.team_managed.as_mut() {
         tm.removed = Some(true);
     }
-    db.save_provider(app, &updated)?;
+    db.save_provider(&app_type_from_str(app).unwrap(), &updated)?;
     Ok(true)
 }
 
@@ -385,7 +387,7 @@ fn mark_missing_registry_ids(
     summary: &mut TeamSyncApplySummary,
 ) -> Result<(), AppError> {
     for app in SUPPORTED_APPS {
-        let providers = db.get_all_providers(app)?;
+        let providers = db.get_all_providers(&app_type_from_str(app).unwrap())?;
         for (id, provider) in providers {
             let Some(entry_id) = provider
                 .meta
